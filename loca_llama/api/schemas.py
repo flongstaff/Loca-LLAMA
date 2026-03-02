@@ -326,6 +326,20 @@ class MemoryCurrentResponse(BaseModel):
     pressure: str
 
 
+class MemorySampleResponse(BaseModel):
+    timestamp: float
+    used_gb: float
+    free_gb: float
+    total_gb: float
+    usage_pct: float
+    pressure: str
+
+
+class MemoryHistoryResponse(BaseModel):
+    samples: list[MemorySampleResponse]
+    count: int
+
+
 class MemoryReportResponse(BaseModel):
     peak_used_gb: float
     baseline_used_gb: float

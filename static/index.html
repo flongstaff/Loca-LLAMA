@@ -120,7 +120,46 @@
 
     <section id="tab-memory" class="tab-content">
       <h2>Memory Monitor</h2>
-      <p class="placeholder">Monitor unified memory usage in real time.</p>
+
+      <div class="memory-gauge">
+        <div class="memory-bar">
+          <div class="memory-fill" id="memory-fill" style="width:0%"></div>
+        </div>
+        <div class="memory-gauge-label" id="memory-gauge-label">-- / -- GB</div>
+      </div>
+
+      <div class="memory-stats" id="memory-stats">
+        <div class="detail-item">
+          <span class="label">Used</span>
+          <span class="value" id="mem-used">--</span>
+        </div>
+        <div class="detail-item">
+          <span class="label">Free</span>
+          <span class="value" id="mem-free">--</span>
+        </div>
+        <div class="detail-item">
+          <span class="label">Total</span>
+          <span class="value" id="mem-total">--</span>
+        </div>
+        <div class="detail-item">
+          <span class="label">Usage</span>
+          <span class="value" id="mem-pct">--</span>
+        </div>
+        <div class="detail-item">
+          <span class="label">Pressure</span>
+          <span class="value" id="mem-pressure"><span class="pressure-badge">--</span></span>
+        </div>
+      </div>
+
+      <div class="memory-chart-container">
+        <h3>Usage History</h3>
+        <canvas id="memory-chart" height="200"></canvas>
+      </div>
+
+      <div class="memory-report" id="memory-report">
+        <h3>Memory Report</h3>
+        <p class="placeholder">Loading report...</p>
+      </div>
     </section>
   </main>
 

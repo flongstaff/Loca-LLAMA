@@ -30,12 +30,14 @@ const api = {
 // ── Tab Switching ───────────────────────────────────────────────────────────
 
 function switchTab(tabName) {
+  stopMemoryPolling();
   document.querySelectorAll("[data-tab]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.tab === tabName);
   });
   document.querySelectorAll(".tab-content").forEach((section) => {
     section.classList.toggle("active", section.id === `tab-${tabName}`);
   });
+  if (tabName === "memory") loadMemory();
 }
 
 document.querySelectorAll("[data-tab]").forEach((btn) => {
@@ -714,8 +716,215 @@ function renderBenchmarkStatus(data) {
   resultsDiv.innerHTML = html;
 }
 
+// ── Memory Tab ──────────────────────────────────────────────────────────────
+
+const MAX_MEMORY_SLOTS = 60;
+let memoryPollTimer = null;
+let memoryHistory = [];
+
+function stopMemoryPolling() {
+  clearTimeout(memoryPollTimer);
+  memoryPollTimer = null;
+}
+
 async function loadMemory() {
-  // Will be implemented in Phase 6
+  stopMemoryPolling();
+  memoryHistory = [];
+
+  const poll = async () => {
+    try {
+      const data = await api.get("/memory/current");
+      memoryHistory.push(data);
+      if (memoryHistory.length > MAX_MEMORY_SLOTS) memoryHistory.shift();
+      renderMemoryGauge(data);
+      renderMemoryChart();
+    } catch (err) {
+      console.error("Memory poll failed:", err);
+    }
+
+    // Only schedule next poll if memory tab is still active
+    const memTab = document.getElementById("tab-memory");
+    if (memTab && memTab.classList.contains("active")) {
+      memoryPollTimer = setTimeout(poll, 2000);
+    }
+  };
+
+  poll();
+  loadMemoryReport();
+}
+
+function renderMemoryGauge(data) {
+  const fill = document.getElementById("memory-fill");
+  const label = document.getElementById("memory-gauge-label");
+  const pct = Math.min(100, Math.max(0, data.usage_pct));
+
+  fill.style.width = `${pct}%`;
+
+  // Color transitions: green -> yellow -> red
+  if (data.pressure === "critical") {
+    fill.className = "memory-fill pressure-critical";
+  } else if (data.pressure === "warn") {
+    fill.className = "memory-fill pressure-warn";
+  } else {
+    fill.className = "memory-fill pressure-normal";
+  }
+
+  label.textContent = `${data.used_gb.toFixed(1)} / ${data.total_gb.toFixed(1)} GB (${pct.toFixed(0)}%)`;
+
+  // Update stat values
+  document.getElementById("mem-used").textContent = `${data.used_gb.toFixed(2)} GB`;
+  document.getElementById("mem-free").textContent = `${data.free_gb.toFixed(2)} GB`;
+  document.getElementById("mem-total").textContent = `${data.total_gb.toFixed(1)} GB`;
+  document.getElementById("mem-pct").textContent = `${pct.toFixed(1)}%`;
+
+  const pressureEl = document.getElementById("mem-pressure");
+  const badgeClass = data.pressure === "critical" ? "pressure-critical"
+    : data.pressure === "warn" ? "pressure-warn"
+    : "pressure-normal";
+  pressureEl.innerHTML = `<span class="pressure-badge ${badgeClass}">${escapeHtml(data.pressure)}</span>`;
+}
+
+function renderMemoryChart() {
+  const canvas = document.getElementById("memory-chart");
+  if (!canvas || memoryHistory.length === 0) return;
+
+  const container = canvas.parentElement;
+  const dpr = window.devicePixelRatio || 1;
+  const displayWidth = container.clientWidth;
+  const displayHeight = 200;
+
+  canvas.width = displayWidth * dpr;
+  canvas.height = displayHeight * dpr;
+  canvas.style.width = `${displayWidth}px`;
+  canvas.style.height = `${displayHeight}px`;
+
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+
+  const pad = { top: 20, right: 20, bottom: 30, left: 50 };
+  const w = displayWidth - pad.left - pad.right;
+  const h = displayHeight - pad.top - pad.bottom;
+
+  // Clear
+  ctx.clearRect(0, 0, displayWidth, displayHeight);
+
+  const totalGb = memoryHistory[memoryHistory.length - 1].total_gb;
+  const maxY = totalGb;
+
+  // Guide lines at 25%, 50%, 75%, 100%
+  ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--border").trim() || "#2d3148";
+  ctx.lineWidth = 1;
+  ctx.font = "11px -apple-system, sans-serif";
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--text-muted").trim() || "#8b8fa8";
+  ctx.textAlign = "right";
+
+  for (const frac of [0.25, 0.5, 0.75, 1.0]) {
+    const y = pad.top + h - (frac * h);
+    ctx.beginPath();
+    ctx.setLineDash([4, 4]);
+    ctx.moveTo(pad.left, y);
+    ctx.lineTo(pad.left + w, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillText(`${(maxY * frac).toFixed(0)}G`, pad.left - 6, y + 4);
+  }
+
+  // Zero line label
+  ctx.fillText("0G", pad.left - 6, pad.top + h + 4);
+
+  if (memoryHistory.length < 2) return;
+
+  // Plot data points
+  const stepX = w / (MAX_MEMORY_SLOTS - 1);
+  const accentColor = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#6c8cff";
+  const offset = MAX_MEMORY_SLOTS - memoryHistory.length;
+
+  // Build path
+  ctx.beginPath();
+  memoryHistory.forEach((sample, i) => {
+    const x = pad.left + (i + offset) * stepX;
+    const y = pad.top + h - (sample.used_gb / maxY) * h;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+
+  // Stroke line
+  ctx.strokeStyle = accentColor;
+  ctx.lineWidth = 2;
+  ctx.setLineDash([]);
+  ctx.stroke();
+
+  // Fill area under line using globalAlpha for color-format safety
+  const lastIdx = memoryHistory.length - 1;
+  const lastX = pad.left + (lastIdx + offset) * stepX;
+  const firstX = pad.left + offset * stepX;
+  ctx.lineTo(lastX, pad.top + h);
+  ctx.lineTo(firstX, pad.top + h);
+  ctx.closePath();
+  ctx.save();
+  ctx.globalAlpha = 0.15;
+  ctx.fillStyle = accentColor;
+  ctx.fill();
+  ctx.restore();
+
+  // X-axis time labels (show first, mid, last)
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--text-muted").trim() || "#8b8fa8";
+  ctx.textAlign = "center";
+  ctx.font = "10px -apple-system, sans-serif";
+
+  // Timestamps are epoch seconds from the API
+  const formatTime = (ts) => {
+    const d = new Date(ts * 1000);
+    return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}:${d.getSeconds().toString().padStart(2, "0")}`;
+  };
+
+  if (memoryHistory.length >= 2) {
+    const firstSample = memoryHistory[0];
+    const lastSample = memoryHistory[lastIdx];
+    ctx.fillText(formatTime(firstSample.timestamp), firstX, pad.top + h + 16);
+    ctx.fillText(formatTime(lastSample.timestamp), lastX, pad.top + h + 16);
+
+    if (memoryHistory.length > 4) {
+      const midIdx = Math.floor(lastIdx / 2);
+      const midX = pad.left + (midIdx + offset) * stepX;
+      ctx.fillText(formatTime(memoryHistory[midIdx].timestamp), midX, pad.top + h + 16);
+    }
+  }
+}
+
+async function loadMemoryReport() {
+  const reportDiv = document.getElementById("memory-report");
+
+  try {
+    const data = await api.get("/memory/report");
+
+    reportDiv.innerHTML = `
+      <h3>Memory Report</h3>
+      <div class="detail-grid">
+        <div class="detail-item">
+          <span class="label">Peak Used</span>
+          <span class="value">${data.peak_used_gb.toFixed(2)} GB (${data.peak_pct.toFixed(1)}%)</span>
+        </div>
+        <div class="detail-item">
+          <span class="label">Baseline Used</span>
+          <span class="value">${data.baseline_used_gb.toFixed(2)} GB (${data.baseline_pct.toFixed(1)}%)</span>
+        </div>
+        <div class="detail-item">
+          <span class="label">Delta</span>
+          <span class="value">${data.delta_gb.toFixed(2)} GB</span>
+        </div>
+        <div class="detail-item">
+          <span class="label">Total Memory</span>
+          <span class="value">${data.total_gb.toFixed(1)} GB</span>
+        </div>
+        <div class="detail-item">
+          <span class="label">Monitoring Duration</span>
+          <span class="value">${data.duration_sec.toFixed(0)}s (${data.sample_count} samples)</span>
+        </div>
+      </div>`;
+  } catch (err) {
+    reportDiv.innerHTML = `<h3>Memory Report</h3><p class="placeholder" style="color:var(--danger)">${escapeHtml(err.message)}</p>`;
+  }
 }
 
 // ── Init ────────────────────────────────────────────────────────────────────
