@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(project-init)",
+      "Bash(mv:*)",
+      "Bash(.venv/bin/pip install:*)",
+      "Bash(timeout 5 .venv/bin/uvicorn loca_llama.api.app:app:*)",
+      "Bash(.venv/bin/python:*)"
+    ]
+  }
+}

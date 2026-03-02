@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allows": [
+      {
+        "tool": "Bash",
+        "prompt": "run Python package installation"
+      },
+      {
+        "tool": "Bash",
+        "prompt": "run pytest test suite"
+      },
+      {
+        "tool": "Bash",
+        "prompt": "run loca-llama CLI commands"
+      },
+      {
+        "tool": "Bash",
+        "prompt": "run git commands"
+      },
+      {
+        "tool": "Bash",
+        "prompt": "run Python module commands"
+      }
+    ],
+    "denies": [
+      {
+        "tool": "Bash",
+        "prompt": "access .env files or secrets"
+      },
+      {
+        "tool": "Bash",
+        "prompt": "access credential files"
+      },
+      {
+        "tool": "Bash",
+        "prompt": "access .key files"
+      }
+    ]
+  }
+}
