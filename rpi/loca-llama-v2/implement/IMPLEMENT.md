@@ -229,3 +229,44 @@
 - Task reference stored on job object to prevent garbage collection
 
 ---
+
+## Phase 6: Memory Monitor
+
+**Date**: 2026-03-02
+**Verdict**: PASS
+
+### Deliverables
+- [x] Task 6.1: Wire MemoryMonitor into lifespan — already wired in Phase 1 (app.py lifespan + AppState interval=1.0)
+- [x] Task 6.2: Implement memory endpoints — GET /current, /history, /report with wall-clock timestamp conversion
+- [x] Task 6.3: Write tests — 12 integration tests covering happy paths, 503 guards, rounding, epoch timestamps
+- [x] Task 6.4: Build Memory tab — live gauge with pressure badge, canvas sparkline chart, report section
+
+### Files Changed
+| File | Change | Lines |
+|------|--------|-------|
+| `loca_llama/memory_monitor.py` | modified (added public methods) | +13 |
+| `loca_llama/api/routes/memory.py` | rewritten (stub → impl) | 109 |
+| `loca_llama/api/schemas.py` | modified (added MemorySampleResponse, MemoryHistoryResponse) | +14 |
+| `tests/api/test_memory_routes.py` | new | 227 |
+| `static/app.js` | modified (memory tab JS) | +211 |
+| `static/index.html` | modified (memory tab HTML) | +41 |
+| `static/style.css` | modified (memory tab CSS) | +86 |
+
+### Verification
+- Tests: PASS (88/88 in 1.65s — 12 new + 76 existing)
+- Build: PASS (app loads with all routes)
+
+### Code Review
+- APPROVED WITH FIXES APPLIED
+- Fixed: wall-clock timestamp conversion (critical — monotonic timestamps displayed as 1970 dates), public methods on MemoryMonitor (critical — private attribute coupling), 503 guard on /report (warning), try/except on all handlers (warning), ctx.globalAlpha for canvas fill (warning — fragile hex parsing), MAX_MEMORY_SLOTS named constant (suggestion)
+
+### Commit
+`3d97650` — Implement memory monitor endpoints with live dashboard and canvas chart
+
+### Notes
+- MemoryMonitor.timestamp is `time.monotonic() - _start_time` (relative seconds). Route converts to epoch via `time.time() - time.monotonic() + start_time + s.timestamp`. Frontend uses `new Date(ts * 1000)`.
+- Added public methods: `get_history(limit)`, `get_report()`, `start_time` property — routes no longer access `_samples` or `_build_report()` directly
+- Canvas fill uses `ctx.globalAlpha` instead of hex-to-rgba parsing (works with any CSS color format)
+- Polling: 2s recursive setTimeout, stops when tab switches away, restarts when tab activates
+
+---

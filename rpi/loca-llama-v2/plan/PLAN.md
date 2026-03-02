@@ -275,25 +275,25 @@ python -m pytest tests/api/test_benchmark_routes.py tests/api/test_runtime_route
 
 **Acceptance**: `python -m pytest tests/api/test_memory_routes.py -v` passes. Memory tab shows live readings that update every 2 seconds.
 
-- [ ] **Task 6.1**: Wire MemoryMonitor into lifespan
+- [x] **Task 6.1**: Wire MemoryMonitor into lifespan
   - Files: `loca_llama/api/app.py`, `loca_llama/api/state.py`
   - Details: Update the lifespan context manager in `app.py` to call `app_state.memory_monitor.start()` on startup and `app_state.memory_monitor.stop()` on shutdown. Add structured logging for start/stop events. Ensure `AppState.__init__` creates the monitor with `interval=1.0`.
   - Complexity: **Low**
   - Dependencies: Task 1.2, Task 1.3
 
-- [ ] **Task 6.2**: Implement memory endpoints
+- [x] **Task 6.2**: Implement memory endpoints
   - Files: `loca_llama/api/routes/memory.py`
   - Details: `GET /api/memory/current` calls `state.memory_monitor.get_current()` and returns `MemoryCurrentResponse` (used_gb, free_gb, total_gb, usage_pct, pressure). `GET /api/memory/report` calls `state.memory_monitor._build_report()` and returns `MemoryReportResponse` (peak, baseline, delta, duration, sample_count). Both use dependency injection to access AppState.
   - Complexity: **Low**
   - Dependencies: Task 1.4, Task 6.1
 
-- [ ] **Task 6.3**: Write tests for memory endpoints (mocked)
+- [x] **Task 6.3**: Write tests for memory endpoints (mocked)
   - Files: `tests/api/test_memory_routes.py`
   - Details: Mock `memory_monitor.get_memory_sample()` to return deterministic values (e.g., 28.5 GB used, 19.5 GB free, 48.0 GB total). Test `/api/memory/current` returns correct shape with plausible values. Test `/api/memory/report` returns report with peak >= baseline. Test memory values are within expected ranges (0 < used < total).
   - Complexity: **Medium**
   - Dependencies: Task 1.7, Task 6.2
 
-- [ ] **Task 6.4**: Build Memory tab with live polling and gauge
+- [x] **Task 6.4**: Build Memory tab with live polling and gauge
   - Files: `static/app.js`, `static/index.html`, `static/style.css`
   - Details: Live memory gauge that polls `GET /api/memory/current` every 2 seconds when the Memory tab is active (stop polling when switching away). Visual bar showing used/total with pressure badge (normal=green, warn=yellow, critical=red). Memory history chart: simple canvas-based line chart showing last 60 readings (~2 minutes). Display: total memory, used, free, percentage, pressure level. Report section showing peak, baseline, delta from `/api/memory/report`.
   - Complexity: **Medium**
