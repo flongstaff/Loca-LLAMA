@@ -117,6 +117,8 @@ async function loadCompatibilityDropdowns() {
     analyzeBtn.addEventListener("click", runAnalysis);
   } catch (err) {
     console.error("Failed to load compatibility dropdowns:", err);
+    document.getElementById("compat-results").innerHTML =
+      `<p class="error-message">Failed to load dropdowns: ${escapeHtml(err.message)} <span class="retry-link" onclick="loadCompatibilityDropdowns()">Retry</span></p>`;
   }
 }
 
@@ -149,7 +151,7 @@ async function runAnalysis() {
     renderTierSummary(data.summary, data.count);
     renderCompatTable();
   } catch (err) {
-    resultsDiv.innerHTML = `<p class="placeholder" style="color:var(--danger)">${escapeHtml(err.message)}</p>`;
+    resultsDiv.innerHTML = `<p class="error-message">${escapeHtml(err.message)}</p>`;
   }
 }
 
@@ -300,6 +302,9 @@ async function showDetail(modelName) {
 let allFamilies = [];
 
 async function loadModels(family) {
+  const container = document.getElementById("models-table");
+  container.innerHTML = '<p class="loading">Loading models…</p>';
+
   try {
     const query = family ? `?family=${encodeURIComponent(family)}` : "";
     const data = await api.get(`/models${query}`);
@@ -316,7 +321,6 @@ async function loadModels(family) {
       });
     }
 
-    const container = document.getElementById("models-table");
     if (data.count === 0) {
       container.innerHTML = '<p class="placeholder">No models found.</p>';
       return;
@@ -348,8 +352,7 @@ async function loadModels(family) {
         <tbody>${rows}</tbody>
       </table>`;
   } catch (err) {
-    const container = document.getElementById("models-table");
-    container.innerHTML = `<p class="placeholder" style="color:var(--danger)">Failed to load models: ${escapeHtml(err.message)}</p>`;
+    container.innerHTML = `<p class="error-message">Failed to load models: ${escapeHtml(err.message)}</p>`;
   }
 }
 
@@ -407,7 +410,7 @@ async function scanLocalModels(customDir) {
         <tbody>${rows}</tbody>
       </table>`;
   } catch (err) {
-    resultsDiv.innerHTML = `<p class="placeholder" style="color:var(--danger)">${escapeHtml(err.message)}</p>`;
+    resultsDiv.innerHTML = `<p class="error-message">${escapeHtml(err.message)}</p>`;
   }
 }
 
@@ -471,7 +474,7 @@ async function searchHub() {
       tr.addEventListener("click", () => showRepoFiles(tr.dataset.repo));
     });
   } catch (err) {
-    resultsDiv.innerHTML = `<p class="placeholder" style="color:var(--danger)">${escapeHtml(err.message)}</p>`;
+    resultsDiv.innerHTML = `<p class="error-message">${escapeHtml(err.message)}</p>`;
   }
 }
 
@@ -504,7 +507,7 @@ async function showRepoFiles(repoId) {
         <tbody>${rows}</tbody>
       </table>`;
   } catch (err) {
-    filesDiv.innerHTML = `<h3>${escapeHtml(repoId)}</h3><p class="placeholder" style="color:var(--danger)">${escapeHtml(err.message)}</p>`;
+    filesDiv.innerHTML = `<h3>${escapeHtml(repoId)}</h3><p class="error-message">${escapeHtml(err.message)}</p>`;
   }
 }
 
@@ -544,7 +547,7 @@ async function detectRuntimes() {
     runtimeSelect.disabled = false;
     statusDiv.innerHTML = `<p style="color:var(--text-muted)">${data.count} runtime${data.count !== 1 ? "s" : ""} detected.</p>`;
   } catch (err) {
-    statusDiv.innerHTML = `<p class="placeholder" style="color:var(--danger)">${escapeHtml(err.message)}</p>`;
+    statusDiv.innerHTML = `<p class="error-message">${escapeHtml(err.message)}</p>`;
   } finally {
     btn.disabled = false;
     btn.textContent = "Detect Runtimes";
@@ -610,7 +613,7 @@ async function startBenchmark() {
     benchJobId = data.job_id;
     pollBenchmarkStatus();
   } catch (err) {
-    statusDiv.innerHTML = `<p class="placeholder" style="color:var(--danger)">${escapeHtml(err.message)}</p>`;
+    statusDiv.innerHTML = `<p class="error-message">${escapeHtml(err.message)}</p>`;
     startBtn.disabled = false;
     startBtn.textContent = "Start Benchmark";
   }
@@ -634,7 +637,7 @@ function pollBenchmarkStatus() {
       }
     } catch (err) {
       document.getElementById("bench-status").innerHTML =
-        `<p class="placeholder" style="color:var(--danger)">${escapeHtml(err.message)}</p>`;
+        `<p class="error-message">${escapeHtml(err.message)}</p>`;
       document.getElementById("bench-start-btn").disabled = false;
       document.getElementById("bench-start-btn").textContent = "Start Benchmark";
     }
@@ -658,7 +661,7 @@ function renderBenchmarkStatus(data) {
   }
 
   if (data.status === "error") {
-    statusDiv.innerHTML = `<p class="placeholder" style="color:var(--danger)">Benchmark failed: ${escapeHtml(data.error || "Unknown error")}</p>`;
+    statusDiv.innerHTML = `<p class="error-message">Benchmark failed: ${escapeHtml(data.error || "Unknown error")}</p>`;
     resultsDiv.innerHTML = "";
     return;
   }
@@ -740,6 +743,10 @@ async function loadMemory() {
       renderMemoryChart();
     } catch (err) {
       console.error("Memory poll failed:", err);
+      if (memoryHistory.length === 0) {
+        document.getElementById("memory-gauge-label").textContent = "Failed to load memory data";
+        return;
+      }
     }
 
     // Only schedule next poll if memory tab is still active
@@ -923,7 +930,7 @@ async function loadMemoryReport() {
         </div>
       </div>`;
   } catch (err) {
-    reportDiv.innerHTML = `<h3>Memory Report</h3><p class="placeholder" style="color:var(--danger)">${escapeHtml(err.message)}</p>`;
+    reportDiv.innerHTML = `<h3>Memory Report</h3><p class="error-message">${escapeHtml(err.message)}</p>`;
   }
 }
 

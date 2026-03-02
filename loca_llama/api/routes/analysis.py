@@ -75,68 +75,86 @@ def _estimate_to_response(est) -> AnalyzeResponse:
 @router.post("", response_model=AnalyzeResponse)
 async def analyze_single(req: AnalyzeRequest) -> AnalyzeResponse:
     """Analyze a single model/quant/context combo against hardware."""
-    mac = _lookup_hardware(req.hardware_name)
-    model = _lookup_model(req.model_name)
-    quant = _lookup_quant(req.quant_name)
+    try:
+        mac = _lookup_hardware(req.hardware_name)
+        model = _lookup_model(req.model_name)
+        quant = _lookup_quant(req.quant_name)
 
-    est = analyze_model(mac, model, quant, req.context_length)
-    return _estimate_to_response(est)
+        est = analyze_model(mac, model, quant, req.context_length)
+        return _estimate_to_response(est)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Analysis failed: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to analyze model")
 
 
 @router.post("/all", response_model=AnalyzeAllResponse)
 async def analyze_all_models(req: AnalyzeAllRequest) -> AnalyzeAllResponse:
     """Analyze all models against hardware, with optional filters."""
-    mac = _lookup_hardware(req.hardware_name)
+    try:
+        mac = _lookup_hardware(req.hardware_name)
 
-    models = MODELS
-    if req.family:
-        models = [m for m in MODELS if m.family.lower() == req.family.lower()]
+        models = MODELS
+        if req.family:
+            models = [m for m in MODELS if m.family.lower() == req.family.lower()]
 
-    results = analyze_all(
-        mac,
-        models,
-        quant_names=req.quant_names,
-        context_length=req.context_length,
-        only_fits=req.only_fits,
-        include_partial=req.include_partial,
-    )
+        results = analyze_all(
+            mac,
+            models,
+            quant_names=req.quant_names,
+            context_length=req.context_length,
+            only_fits=req.only_fits,
+            include_partial=req.include_partial,
+        )
 
-    responses = [_estimate_to_response(est) for est in results]
+        responses = [_estimate_to_response(est) for est in results]
 
-    summary = TierSummary()
-    for est in results:
-        if est.tier == CompatibilityTier.FULL_GPU:
-            summary.full_gpu += 1
-        elif est.tier == CompatibilityTier.COMFORTABLE:
-            summary.comfortable += 1
-        elif est.tier == CompatibilityTier.TIGHT_FIT:
-            summary.tight_fit += 1
-        elif est.tier == CompatibilityTier.PARTIAL_OFFLOAD:
-            summary.partial_offload += 1
-        else:
-            summary.wont_fit += 1
+        summary = TierSummary()
+        for est in results:
+            if est.tier == CompatibilityTier.FULL_GPU:
+                summary.full_gpu += 1
+            elif est.tier == CompatibilityTier.COMFORTABLE:
+                summary.comfortable += 1
+            elif est.tier == CompatibilityTier.TIGHT_FIT:
+                summary.tight_fit += 1
+            elif est.tier == CompatibilityTier.PARTIAL_OFFLOAD:
+                summary.partial_offload += 1
+            else:
+                summary.wont_fit += 1
 
-    return AnalyzeAllResponse(
-        results=responses,
-        count=len(responses),
-        hardware=req.hardware_name,
-        summary=summary,
-    )
+        return AnalyzeAllResponse(
+            results=responses,
+            count=len(responses),
+            hardware=req.hardware_name,
+            summary=summary,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Bulk analysis failed: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to analyze models")
 
 
 @router.post("/max-context", response_model=MaxContextResponse)
 async def find_max_context(req: MaxContextRequest) -> MaxContextResponse:
     """Find the maximum context length that fits in memory."""
-    mac = _lookup_hardware(req.hardware_name)
-    model = _lookup_model(req.model_name)
-    quant = _lookup_quant(req.quant_name)
+    try:
+        mac = _lookup_hardware(req.hardware_name)
+        model = _lookup_model(req.model_name)
+        quant = _lookup_quant(req.quant_name)
 
-    max_ctx = max_context_for_model(mac, model, quant)
-    max_k = f"{max_ctx // 1024}K" if max_ctx >= 1024 else str(max_ctx)
+        max_ctx = max_context_for_model(mac, model, quant)
+        max_k = f"{max_ctx // 1024}K" if max_ctx >= 1024 else str(max_ctx)
 
-    return MaxContextResponse(
-        model_name=req.model_name,
-        quant_name=req.quant_name,
-        max_context_length=max_ctx,
-        max_context_k=max_k,
-    )
+        return MaxContextResponse(
+            model_name=req.model_name,
+            quant_name=req.quant_name,
+            max_context_length=max_ctx,
+            max_context_k=max_k,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Max context search failed: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to find max context")

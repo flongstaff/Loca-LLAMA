@@ -48,3 +48,17 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short -x"
+
+[tool.coverage.run]
+source = ["loca_llama"]
+omit = [
+    "loca_llama/cli.py",
+    "loca_llama/interactive.py",
+    "loca_llama/__main__.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__",
+]
