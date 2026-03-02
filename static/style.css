@@ -225,6 +225,127 @@ button.btn:disabled {
   cursor: not-allowed;
 }
 
+/* ── Checkbox Labels ─────────────────────────────────────────────────── */
+
+.checkbox-label {
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 0.5rem !important;
+  text-transform: none !important;
+  font-weight: 400 !important;
+  font-size: 0.875rem !important;
+  color: var(--text) !important;
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--accent);
+}
+
+/* ── Summary Bar ────────────────────────────────────────────────────── */
+
+.tier-summary {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+}
+
+.tier-summary .tier-count {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.tier-summary .tier-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.tier-dot.full-gpu { background: #4caf50; }
+.tier-dot.comfortable { background: #66bb6a; }
+.tier-dot.tight-fit { background: #ff9800; }
+.tier-dot.partial-offload { background: #ff7043; }
+.tier-dot.wont-fit { background: #f44336; }
+
+/* ── Sortable Table ─────────────────────────────────────────────────── */
+
+th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+th.sortable:hover {
+  color: var(--text);
+}
+
+th.sortable::after {
+  content: " \2195";
+  opacity: 0.4;
+}
+
+th.sort-asc::after {
+  content: " \2191";
+  opacity: 1;
+}
+
+th.sort-desc::after {
+  content: " \2193";
+  opacity: 1;
+}
+
+/* ── Detail Panel ───────────────────────────────────────────────────── */
+
+.detail-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  margin-top: 1rem;
+}
+
+.detail-panel h3 {
+  font-size: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+
+.detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.detail-item .label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.detail-item .value {
+  font-size: 0.95rem;
+  font-family: var(--mono);
+}
+
+/* ── Loading Spinner ────────────────────────────────────────────────── */
+
+.loading {
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 1rem 0;
+}
+
 /* ── Footer ──────────────────────────────────────────────────────────── */
 
 footer {

@@ -107,3 +107,38 @@
 - Endpoints: All 4 data routes return real data; remaining 7 routes still 501
 
 ---
+
+## Phase 3: Analysis Endpoints
+
+**Date**: 2026-03-02
+**Verdict**: PASS
+
+### Deliverables
+- [x] Task 3.1: Single analysis endpoint — POST /api/analyze with hardware/model/quant lookup + 400 errors
+- [x] Task 3.2: Bulk analysis + max-context — POST /api/analyze/all with tier summary, POST /api/analyze/max-context
+- [x] Task 3.3: Unit tests — 16 tests for estimate_model_size_gb, estimate_kv_cache_gb, estimate_overhead_gb, compute_tier, analyze_model, max_context_for_model
+- [x] Task 3.4: Integration tests — 11 tests for analysis API routes (valid/invalid inputs, filters, core match)
+- [x] Task 3.5: Compatibility tab — sortable results table, tier badges, detail panel with memory breakdown + max context
+
+### Files Changed
+| File | Change | Lines |
+|------|--------|-------|
+| `loca_llama/api/routes/analysis.py` | rewritten (stub → impl) | 127 |
+| `tests/test_analyzer.py` | new | 137 |
+| `tests/api/test_analysis_routes.py` | new | 153 |
+| `static/app.js` | rewritten (analysis tab + sorting) | 392 |
+| `static/index.html` | modified (family filter, checkbox, containers) | +8 |
+| `static/style.css` | modified (badges, summary, detail panel) | +121 |
+
+### Verification
+- Tests: PASS (42/42 in 0.25s — 27 new + 15 existing)
+- Build: PASS (app starts with all routes registered)
+- Analysis API matches core analyzer output for same inputs
+
+### Notes
+- ModelEstimate → AnalyzeResponse mapping: `tier.value` for tier string, `rating` for tier_label
+- Rounding: 2 decimals for GB, 1 for percentages/tok/s, 0 for context K values
+- Frontend tier sorting uses TIER_ORDER map for correct ordering
+- Detail panel makes secondary API call to /api/analyze/max-context
+
+---

@@ -30,9 +30,17 @@
         <label>Quantization
           <select id="quant-select"><option value="">Loading…</option></select>
         </label>
+        <label>Family
+          <select id="compat-family-select"><option value="">All Families</option></select>
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="only-fits-check" checked> Only show models that fit
+        </label>
         <button class="btn" id="analyze-btn" disabled>Analyze</button>
       </div>
+      <div id="compat-summary"></div>
       <div id="compat-results"></div>
+      <div id="compat-detail" class="detail-panel" style="display:none;"></div>
     </section>
 
     <section id="tab-models" class="tab-content">

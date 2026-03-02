@@ -138,31 +138,31 @@ uvicorn loca_llama.api.app:app --reload  # Open browser, verify dropdowns popula
 
 **Acceptance**: `python -m pytest tests/test_analyzer.py tests/api/test_analysis_routes.py -v` passes. Compatibility tab shows results with tier badges, and analysis output matches CLI for the same inputs.
 
-- [ ] **Task 3.1**: Implement single analysis endpoint
+- [x] **Task 3.1**: Implement single analysis endpoint
   - Files: `loca_llama/api/routes/analysis.py`
   - Details: `POST /api/analyze` accepts `AnalyzeRequest`, looks up hardware/model/quant by name, calls `analyzer.analyze_model()`, returns `AnalyzeResponse`. Returns 400 if hardware, model, or quant name not found.
   - Complexity: **Medium**
   - Dependencies: Task 1.4, Task 1.5
 
-- [ ] **Task 3.2**: Implement bulk analysis and max-context endpoints
+- [x] **Task 3.2**: Implement bulk analysis and max-context endpoints
   - Files: `loca_llama/api/routes/analysis.py`
   - Details: `POST /api/analyze/all` accepts `AnalyzeAllRequest`, iterates models (filtered by family if provided), calls `analyzer.analyze_model()` for each model+quant combo, filters by `only_fits` and `include_partial`, returns `AnalyzeAllResponse` with summary counts per tier. `POST /api/analyze/max-context` accepts `MaxContextRequest`, calls `analyzer.max_context_for_model()`, returns `MaxContextResponse`.
   - Complexity: **Medium**
   - Dependencies: Task 3.1
 
-- [ ] **Task 3.3**: Write unit tests for analyzer functions
+- [x] **Task 3.3**: Write unit tests for analyzer functions
   - Files: `tests/test_analyzer.py`
   - Details: Test `estimate_model_size_gb()` for known model sizes. Test `estimate_kv_cache_gb()` for specific architectures. Test `compute_tier()` at boundary conditions (75%, 90%, 100%, 150% utilization). Test `analyze_model()` for M4 Pro 48GB + Qwen 32B + Q4_K_M and verify against known values. Test `max_context_for_model()` returns reasonable values.
   - Complexity: **Medium**
   - Dependencies: Task 1.7
 
-- [ ] **Task 3.4**: Write integration tests for analysis routes
+- [x] **Task 3.4**: Write integration tests for analysis routes
   - Files: `tests/api/test_analysis_routes.py`
   - Details: Test `POST /api/analyze` with valid input returns 200 with correct fields. Test with invalid hardware name returns 400. Test `POST /api/analyze/all` returns results and summary. Test `only_fits=true` filters out WONT_FIT results. Test `POST /api/analyze/max-context` returns positive context length. Verify API output matches direct `analyzer.analyze_model()` call for same inputs.
   - Complexity: **Medium**
   - Dependencies: Task 1.7, Tasks 3.1-3.2
 
-- [ ] **Task 3.5**: Build Compatibility tab in frontend
+- [x] **Task 3.5**: Build Compatibility tab in frontend
   - Files: `static/app.js`, `static/index.html`, `static/style.css`
   - Details: Hardware selector triggers `POST /api/analyze/all`. Results table with columns: Model Name, Family, Quant, Total Memory (GB), Headroom (GB), Tier, Est. Speed (tok/s). Rows color-coded by tier (green=FULL_GPU, blue=COMFORTABLE, yellow=TIGHT_FIT, orange=PARTIAL_OFFLOAD, red=WONT_FIT). Client-side column sorting. Family filter dropdown. Tier filter checkboxes. "Only show models that fit" toggle (default on, hides WONT_FIT). Click row to expand detail panel showing template, max context, memory breakdown. Context length slider.
   - Complexity: **High**
