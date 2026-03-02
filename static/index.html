@@ -93,7 +93,29 @@
 
     <section id="tab-benchmark" class="tab-content">
       <h2>Benchmark</h2>
-      <p class="placeholder">Run benchmarks against local runtimes (LM Studio, llama.cpp).</p>
+      <div class="controls">
+        <button class="btn" id="detect-runtimes-btn">Detect Runtimes</button>
+        <label>Runtime
+          <select id="bench-runtime-select" disabled><option value="">Detect runtimes first…</option></select>
+        </label>
+        <label>Model
+          <select id="bench-model-select" disabled><option value="">Select runtime first…</option></select>
+        </label>
+        <label>Prompt
+          <select id="bench-prompt-select">
+            <option value="default">Default</option>
+            <option value="coding">Coding</option>
+            <option value="reasoning">Reasoning</option>
+            <option value="creative">Creative</option>
+          </select>
+        </label>
+        <label>Runs
+          <input type="number" id="bench-runs-input" value="3" min="1" max="10" style="width:60px">
+        </label>
+        <button class="btn" id="bench-start-btn" disabled>Start Benchmark</button>
+      </div>
+      <div id="bench-status"></div>
+      <div id="bench-results"></div>
     </section>
 
     <section id="tab-memory" class="tab-content">

@@ -183,31 +183,31 @@ python -m pytest tests/test_analyzer.py tests/api/test_analysis_routes.py -v
 
 **Acceptance**: `python -m pytest tests/api/test_scanner_routes.py tests/api/test_hub_routes.py -v` passes. Local scan finds models on disk. HuggingFace search returns results.
 
-- [ ] **Task 4.1**: Implement local scanner endpoint
+- [x] **Task 4.1**: Implement local scanner endpoint
   - Files: `loca_llama/api/routes/scanner.py`
   - Details: `GET /api/scanner/local` with optional `custom_dir` query param. Uses `asyncio.to_thread(scanner.scan_all)` for non-blocking filesystem I/O. If `custom_dir` provided, also scans that directory via `scanner.scan_custom_dir()`. Returns `ScannerResponse` with models, count, total_size_gb, and source breakdown.
   - Complexity: **Medium**
   - Dependencies: Task 1.3, Task 1.4
 
-- [ ] **Task 4.2**: Implement HuggingFace hub endpoints
+- [x] **Task 4.2**: Implement HuggingFace hub endpoints
   - Files: `loca_llama/api/routes/hub.py`
   - Details: `GET /api/hub/search` with `query` (required), `limit`, `sort`, `format` params. Uses `asyncio.to_thread(hub.search_huggingface)` or the format-specific search functions. `GET /api/hub/files/{repo_id:path}` gets file listing via `asyncio.to_thread(hub.get_model_files)`. `GET /api/hub/config/{repo_id:path}` fetches HF config via `asyncio.to_thread(hf_templates.fetch_hf_model_config)`. Network errors return 502.
   - Complexity: **Medium**
   - Dependencies: Task 1.3, Task 1.4
 
-- [ ] **Task 4.3**: Write tests for discovery endpoints (mocked)
+- [x] **Task 4.3**: Write tests for discovery endpoints (mocked)
   - Files: `tests/api/test_scanner_routes.py`, `tests/api/test_hub_routes.py`
   - Details: Mock `scanner.scan_all()` to return synthetic model list. Verify response shape, count, total_size_gb calculation. Mock `hub.search_huggingface()` to return synthetic results. Test limit and format filters. Mock `hf_templates.fetch_hf_model_config()` for config endpoint. Test 502 response when mock raises network error.
   - Complexity: **Medium**
   - Dependencies: Task 1.7, Tasks 4.1-4.2
 
-- [ ] **Task 4.4**: Build Local Models tab
+- [x] **Task 4.4**: Build Local Models tab
   - Files: `static/app.js`, `static/index.html`, `static/style.css`
   - Details: "Scan Local Models" button triggers `GET /api/scanner/local`. Loading spinner during scan. Results table: name, size (GB), format badge, source badge, quant, family. Summary bar: total count, total size, counts by source. "Scan Custom Directory" input + button. Empty state message when no models found. Error state for scan failures.
   - Complexity: **Medium**
   - Dependencies: Task 1.6, Task 4.1
 
-- [ ] **Task 4.5**: Build HuggingFace tab
+- [x] **Task 4.5**: Build HuggingFace tab
   - Files: `static/app.js`, `static/index.html`, `static/style.css`
   - Details: Search input with 300ms debounce. Format filter (All / GGUF / MLX). Sort selector (downloads / likes / lastModified). Results cards: repo_id, author, downloads, likes, tags, format badges. Click result to show file listing from `/api/hub/files/{repo_id}`. "Check compatibility" action that navigates to Compatibility tab with the model. Network error state. Loading indicator during search.
   - Complexity: **Medium**
@@ -228,31 +228,31 @@ python -m pytest tests/api/test_scanner_routes.py tests/api/test_hub_routes.py -
 
 **Acceptance**: `python -m pytest tests/api/test_benchmark_routes.py tests/api/test_runtime_routes.py -v` passes. Benchmark job lifecycle (start -> poll progress -> complete/error) works end-to-end.
 
-- [ ] **Task 5.1**: Implement runtime status endpoint
+- [x] **Task 5.1**: Implement runtime status endpoint
   - Files: `loca_llama/api/routes/runtime.py`
   - Details: `GET /api/runtime/status` uses `asyncio.to_thread(benchmark.detect_all_runtimes)` to probe LM Studio (port 1234) and llama.cpp (ports 8080, 8081). Returns `RuntimeStatusResponse` with list of detected runtimes, each including name, URL, loaded models, and version.
   - Complexity: **Low**
   - Dependencies: Task 1.3, Task 1.4
 
-- [ ] **Task 5.2**: Implement benchmark prompts endpoint
+- [x] **Task 5.2**: Implement benchmark prompts endpoint
   - Files: `loca_llama/api/routes/benchmark.py`
   - Details: `GET /api/benchmark/prompts` returns available prompt types from `benchmark.BENCH_PROMPTS`. Returns `BenchmarkPromptsResponse`.
   - Complexity: **Low**
   - Dependencies: Task 1.4
 
-- [ ] **Task 5.3**: Implement benchmark start and polling endpoints
+- [x] **Task 5.3**: Implement benchmark start and polling endpoints
   - Files: `loca_llama/api/routes/benchmark.py`, `loca_llama/api/state.py`
   - Details: `POST /api/benchmark/start` validates runtime exists, creates a `BenchmarkJob` in AppState, launches `asyncio.create_task()` wrapping `asyncio.to_thread(run_benchmark_suite)` with progress callback. Returns job_id immediately. `GET /api/benchmark/{job_id}` returns current status (running with progress, complete with results + aggregate, error with message, or 404 for unknown job_id). Implement `_run_benchmark_background()` async helper as specified in eng.md Section 4.
   - Complexity: **High**
   - Dependencies: Task 1.3, Task 1.4, Task 5.1
 
-- [ ] **Task 5.4**: Write tests for benchmark and runtime endpoints (mocked)
+- [x] **Task 5.4**: Write tests for benchmark and runtime endpoints (mocked)
   - Files: `tests/api/test_benchmark_routes.py`, `tests/api/test_runtime_routes.py`
   - Details: Mock `benchmark.detect_all_runtimes()` to return synthetic runtime info. Test runtime status returns correct shape. Mock `benchmark.run_benchmark_suite()` to return synthetic results after short delay. Test benchmark start returns job_id. Test polling returns "running" then "complete". Test 404 for nonexistent job_id. Test 400 when runtime not found. Test prompts endpoint returns dict.
   - Complexity: **High**
   - Dependencies: Task 1.7, Tasks 5.1-5.3
 
-- [ ] **Task 5.5**: Build Benchmark tab with polling UI
+- [x] **Task 5.5**: Build Benchmark tab with polling UI
   - Files: `static/app.js`, `static/index.html`, `static/style.css`
   - Details: On tab open, auto-detect runtimes via `GET /api/runtime/status` with status indicators. "Start Benchmark" form: runtime selector, model selector (populated from detected runtimes), prompt type selector, num_runs slider, max_tokens input. Submit triggers `POST /api/benchmark/start`. Progress bar polls `GET /api/benchmark/{job_id}` every 2 seconds (clearInterval on complete/error). Results table: run#, tok/s, prefill tok/s, TTFT, total time. Aggregate summary section. Error state with runtime-specific message. Empty state when no runtimes detected.
   - Complexity: **High**

@@ -142,3 +142,90 @@
 - Detail panel makes secondary API call to /api/analyze/max-context
 
 ---
+
+## Phase 4: Discovery Endpoints
+
+**Date**: 2026-03-02
+**Verdict**: PASS
+
+### Deliverables
+- [x] Task 4.1: Scanner endpoint — GET /api/scanner/local with optional custom_dir, source breakdown, total_size_gb
+- [x] Task 4.2: Hub endpoints — GET /api/hub/search (gguf/mlx/all dispatch), GET /api/hub/files/{repo_id}, GET /api/hub/config/{repo_id}
+- [x] Task 4.3: Mocked tests — 6 scanner + 12 hub tests with unittest.mock.patch at route level
+- [x] Task 4.4: Local Models tab — scan button, custom dir input, results table with Name/Size/Format/Source/Quant/Family
+- [x] Task 4.5: HuggingFace tab — debounced search, format/sort filters, file listing panel
+
+### Files Changed
+| File | Change | Lines |
+|------|--------|-------|
+| `loca_llama/api/routes/scanner.py` | rewritten (stub → impl) | 59 |
+| `loca_llama/api/routes/hub.py` | rewritten (stub → impl) | 108 |
+| `tests/api/test_scanner_routes.py` | new | 112 |
+| `tests/api/test_hub_routes.py` | new | 193 |
+| `static/index.html` | modified (Local Models + HuggingFace tabs) | +20 |
+| `static/app.js` | modified (scanLocalModels, searchHub, showRepoFiles) | +170 |
+
+### Verification
+- Tests: PASS (60/60 in 0.45s — 18 new + 42 existing)
+- Build: PASS (app loads with 26 routes)
+
+### Code Review
+- APPROVED WITH FIXES APPLIED
+- Fixed: showRepoFiles URL encoding bug (critical), generic error messages in 500/502 responses (security), type hint on _model_to_response
+- Deferred to Phase 7: `format` builtin shadowing, `sort` Literal validation, scan button disable-while-running
+
+### Commit
+`0aa4c18` — Implement discovery endpoints with scanner, hub, and frontend tabs
+
+### Notes
+- All blocking I/O wrapped in asyncio.to_thread() (filesystem scan, network requests)
+- LocalModel.path is Path → needs str() for Pydantic serialization
+- Hub format param dispatches to search_gguf_models/search_mlx_models/search_huggingface
+- HubFileResponse.size defaults None→0 in route
+- 300ms debounce on HuggingFace search input
+- Error details sanitized: 500/502 return generic messages, raw exceptions logged server-side only
+
+---
+
+## Phase 5: Benchmark & Runtime
+
+**Date**: 2026-03-02
+**Verdict**: PASS
+
+### Deliverables
+- [x] Task 5.1: Runtime status endpoint — GET /api/runtime/status via asyncio.to_thread(detect_all_runtimes)
+- [x] Task 5.2: Benchmark prompts endpoint — GET /api/benchmark/prompts returning BENCH_PROMPTS dict
+- [x] Task 5.3: Benchmark start + polling — POST /api/benchmark/start (validates runtime/model/prompt, launches asyncio.create_task), GET /api/benchmark/{job_id} (progress/results/error)
+- [x] Task 5.4: Mocked tests — 5 runtime + 11 benchmark tests with unittest.mock.patch
+- [x] Task 5.5: Benchmark tab — detect runtimes, select runtime/model, configure prompt/runs, start benchmark, poll progress bar, display aggregate + per-run results
+
+### Files Changed
+| File | Change | Lines |
+|------|--------|-------|
+| `loca_llama/api/routes/runtime.py` | rewritten (stub → impl) | 39 |
+| `loca_llama/api/routes/benchmark.py` | rewritten (stub → impl) | 180 |
+| `tests/api/test_runtime_routes.py` | new | 83 |
+| `tests/api/test_benchmark_routes.py` | new | 247 |
+| `static/index.html` | modified (benchmark tab controls) | +24 |
+| `static/app.js` | modified (benchmark tab JS) | +213 |
+| `static/style.css` | modified (progress bar CSS) | +30 |
+
+### Verification
+- Tests: PASS (76/76 in 1.49s — 16 new + 60 existing)
+- Build: PASS (app loads with 26 routes)
+
+### Code Review
+- APPROVED WITH FIXES APPLIED
+- Fixed: raw exception leak in background task error (critical — sanitized to generic message), thread-safe progress updates via call_soon_threadsafe (critical — data race), stored create_task reference (warning)
+- Deferred: 400 error messages echo user input (acceptable for localhost tool), "Run 0 of N" UX, schema upper bounds on max_tokens/context_length
+
+### Commit
+(pending)
+
+### Notes
+- Background task pattern: asyncio.create_task() + asyncio.to_thread(run_benchmark_suite) with progress_callback
+- Progress callback uses loop.call_soon_threadsafe() for thread-safe attribute writes from worker thread
+- Error messages sanitized in both sync (HTTPException) and async (background task) error paths
+- Task reference stored on job object to prevent garbage collection
+
+---
