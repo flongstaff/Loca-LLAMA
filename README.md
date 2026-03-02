@@ -109,7 +109,7 @@ LLM inference on Apple Silicon is memory-bandwidth-bound:
 Tokens/sec ≈ Memory_Bandwidth / (Model_Size × 1.1)
 ```
 
-The M4 Pro with 48GB has 273 GB/s bandwidth — enough for ~17 tok/s on a Q4_K_M 70B model.
+For example, an M4 Pro with 48GB has 273 GB/s bandwidth — enough for ~17 tok/s on a Q4_K_M 70B model.
 
 ### Quantization Quick Reference
 
@@ -121,9 +121,9 @@ The M4 Pro with 48GB has 273 GB/s bandwidth — enough for ~17 tok/s on a Q4_K_M
 | Q8_0    | 8.50       | Excellent   | ~7.6 GB       |
 | FP16    | 16.00      | Lossless    | ~14.3 GB      |
 
-## Your Mac: M4 Pro 48GB
+## Example Output: M4 Pro 48GB
 
-With 48GB unified memory (~44GB usable), you can run:
+With 48GB unified memory (~44GB usable), you could run:
 
 | Model              | Quant   | Memory | Speed      | Max Context |
 |--------------------|---------|--------|------------|-------------|
