@@ -465,7 +465,7 @@ def cmd_scan(args) -> None:
     print(f"  Found {GREEN}{len(models)}{RESET} model(s):\n")
 
     source_colors = {
-        "lm-studio": MAGENTA, "llama.cpp": CYAN, "ollama": GREEN,
+        "lm-studio": MAGENTA, "llama.cpp": CYAN,
         "huggingface": YELLOW, "mlx-community": GREEN,
     }
 

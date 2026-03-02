@@ -1,8 +1,6 @@
-"""Scan for locally downloaded LLM models from LM Studio, llama.cpp, and Ollama."""
+"""Scan for locally downloaded LLM models from LM Studio and llama.cpp."""
 
-import json
 import re
-import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -14,8 +12,8 @@ class LocalModel:
     name: str
     path: Path
     size_gb: float
-    format: str  # "gguf", "mlx", "safetensors", "bin", "ollama"
-    source: str  # "lm-studio", "llama.cpp", "huggingface", "mlx-community", "ollama", "unknown"
+    format: str  # "gguf", "mlx", "safetensors", "bin"
+    source: str  # "lm-studio", "llama.cpp", "huggingface", "mlx-community", "custom"
     quant: str | None = None  # Detected quantization from filename
     family: str | None = None  # Detected model family
     repo_id: str | None = None  # HuggingFace repo id if detectable
@@ -37,11 +35,6 @@ LLAMA_CPP_PATHS = [
 # HuggingFace cache
 HUGGINGFACE_PATHS = [
     Path.home() / ".cache" / "huggingface" / "hub",
-]
-
-# MLX cache
-MLX_PATHS = [
-    Path.home() / ".cache" / "huggingface" / "hub",  # MLX models also cached here
 ]
 
 # Quantization patterns in filenames
@@ -153,10 +146,8 @@ def scan_mlx_models(directory: Path) -> list[LocalModel]:
             continue
         org, model_name = parts
 
-        # Check if this is an MLX model
         is_mlx = "mlx" in org.lower() or "mlx" in model_name.lower()
 
-        # Find the latest snapshot
         snapshots_dir = model_dir / "snapshots"
         if not snapshots_dir.exists():
             continue
@@ -167,16 +158,13 @@ def scan_mlx_models(directory: Path) -> list[LocalModel]:
 
         latest = snapshot_dirs[0]
 
-        # Check for model files
         has_safetensors = any(latest.glob("*.safetensors"))
-        has_bin = any(latest.glob("*.bin"))
         has_gguf = any(latest.glob("*.gguf"))
 
-        if not (has_safetensors or has_bin or has_gguf):
+        if not (has_safetensors or has_gguf):
             continue
 
         if has_gguf:
-            # GGUF files inside HF cache
             for gguf in latest.glob("*.gguf"):
                 models.append(LocalModel(
                     name=gguf.stem,
@@ -205,48 +193,6 @@ def scan_mlx_models(directory: Path) -> list[LocalModel]:
     return models
 
 
-def scan_ollama_models() -> list[LocalModel]:
-    """Get models from Ollama's API and local blob storage."""
-    models = []
-    try:
-        req = urllib.request.Request(
-            "http://127.0.0.1:11434/api/tags",
-            headers={"User-Agent": "loca-llama/0.1"},
-        )
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            data = json.loads(resp.read().decode())
-    except Exception:
-        return models
-
-    # Ollama blobs stored here on macOS
-    ollama_dir = Path.home() / ".ollama" / "models"
-
-    for m in data.get("models", []):
-        name = m.get("name", "")
-        size_bytes = m.get("size", 0)
-        details = m.get("details", {})
-        quant_level = details.get("quantization_level")
-        param_size = details.get("parameter_size", "")
-        family_name = details.get("family", "")
-
-        models.append(LocalModel(
-            name=name,
-            path=ollama_dir / "manifests" / name.replace(":", "/"),
-            size_gb=size_bytes / (1024**3),
-            format="ollama",
-            source="ollama",
-            quant=quant_level,
-            family=family_name.capitalize() if family_name else detect_family(name),
-            metadata={
-                "parameter_size": param_size,
-                "family": family_name,
-                "format": details.get("format", ""),
-            },
-        ))
-
-    return models
-
-
 def scan_all() -> list[LocalModel]:
     """Scan all known locations for downloaded models."""
     all_models: list[LocalModel] = []
@@ -260,8 +206,6 @@ def scan_all() -> list[LocalModel]:
     for path in HUGGINGFACE_PATHS:
         all_models.extend(scan_mlx_models(path))
 
-    all_models.extend(scan_ollama_models())
-
     # Deduplicate by path
     seen_paths: set[Path] = set()
     unique: list[LocalModel] = []
@@ -270,7 +214,6 @@ def scan_all() -> list[LocalModel]:
             seen_paths.add(m.path)
             unique.append(m)
 
-    # Sort by size descending
     unique.sort(key=lambda m: m.size_gb, reverse=True)
     return unique
 
@@ -284,7 +227,6 @@ def scan_custom_dir(directory: str) -> list[LocalModel]:
     models: list[LocalModel] = []
     models.extend(scan_gguf_files(path, "custom"))
 
-    # Also check for safetensors/MLX
     for st_file in path.rglob("*.safetensors"):
         parent = st_file.parent
         if parent in {m.path for m in models}:
