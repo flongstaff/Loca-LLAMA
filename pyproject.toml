@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "loca-llama"
+version = "0.1.0"
+description = "Local LLM Apple Mac Analyzer — check which LLMs your Mac can run"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+keywords = ["llm", "apple-silicon", "llama", "mac", "gguf", "mlx", "quantization"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.scripts]
+loca-llama = "loca_llama.cli:main"
+loca-llama-ui = "loca_llama.interactive:main_interactive"
+
+[tool.setuptools.packages.find]
+include = ["loca_llama*"]
