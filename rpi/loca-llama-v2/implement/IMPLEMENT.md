@@ -220,7 +220,7 @@
 - Deferred: 400 error messages echo user input (acceptable for localhost tool), "Run 0 of N" UX, schema upper bounds on max_tokens/context_length
 
 ### Commit
-(pending)
+`fc2fbe0` — Implement benchmark & runtime endpoints with thread-safe progress tracking
 
 ### Notes
 - Background task pattern: asyncio.create_task() + asyncio.to_thread(run_benchmark_suite) with progress_callback
