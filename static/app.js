@@ -351,15 +351,162 @@ async function loadModels(family) {
   }
 }
 
+// ── Local Models Tab ────────────────────────────────────────────────────────
+
+function formatSizeGb(gb) {
+  return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(gb * 1024).toFixed(0)} MB`;
+}
+
+async function scanLocalModels(customDir) {
+  const resultsDiv = document.getElementById("scan-results");
+  const summaryDiv = document.getElementById("scan-summary");
+
+  resultsDiv.innerHTML = '<p class="loading">Scanning…</p>';
+  summaryDiv.innerHTML = "";
+
+  try {
+    const query = customDir ? `?custom_dir=${encodeURIComponent(customDir)}` : "";
+    const data = await api.get(`/scanner/local${query}`);
+
+    if (data.count === 0) {
+      resultsDiv.innerHTML = '<p class="placeholder">No models found. Try scanning a custom directory.</p>';
+      return;
+    }
+
+    const sourceEntries = Object.entries(data.sources)
+      .map(([src, n]) => `<span class="tier-count">${n} ${escapeHtml(src)}</span>`)
+      .join("");
+
+    summaryDiv.innerHTML = `
+      <div class="tier-summary">
+        <span style="color:var(--text-muted)">${data.count} models (${formatSizeGb(data.total_size_gb)} total):</span>
+        ${sourceEntries}
+      </div>`;
+
+    const rows = data.models
+      .map(
+        (m) => `<tr>
+          <td>${escapeHtml(m.name)}</td>
+          <td>${formatSizeGb(m.size_gb)}</td>
+          <td>${escapeHtml(m.format)}</td>
+          <td>${escapeHtml(m.source)}</td>
+          <td>${m.quant ? escapeHtml(m.quant) : "—"}</td>
+          <td>${m.family ? escapeHtml(m.family) : "—"}</td>
+        </tr>`
+      )
+      .join("");
+
+    resultsDiv.innerHTML = `
+      <table>
+        <thead><tr>
+          <th>Name</th><th>Size</th><th>Format</th>
+          <th>Source</th><th>Quant</th><th>Family</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  } catch (err) {
+    resultsDiv.innerHTML = `<p class="placeholder" style="color:var(--danger)">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+// ── HuggingFace Tab ─────────────────────────────────────────────────────────
+
+let hubDebounceTimer = null;
+
+function formatDownloads(n) {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
+async function searchHub() {
+  const query = document.getElementById("hub-search-input").value.trim();
+  if (!query) return;
+
+  const format = document.getElementById("hub-format-select").value || undefined;
+  const sort = document.getElementById("hub-sort-select").value;
+  const resultsDiv = document.getElementById("hub-results");
+  const filesDiv = document.getElementById("hub-files");
+
+  resultsDiv.innerHTML = '<p class="loading">Searching…</p>';
+  filesDiv.style.display = "none";
+
+  try {
+    let url = `/hub/search?query=${encodeURIComponent(query)}&sort=${sort}&limit=30`;
+    if (format) url += `&format=${format}`;
+    const data = await api.get(url);
+
+    if (data.count === 0) {
+      resultsDiv.innerHTML = '<p class="placeholder">No models found.</p>';
+      return;
+    }
+
+    const rows = data.results
+      .map(
+        (m) => `<tr data-repo="${escapeHtml(m.repo_id)}" style="cursor:pointer">
+          <td>${escapeHtml(m.repo_id)}</td>
+          <td>${formatDownloads(m.downloads)}</td>
+          <td>${m.likes}</td>
+          <td>${m.is_gguf ? '<span class="badge comfortable">GGUF</span>' : ""}${m.is_mlx ? '<span class="badge full-gpu">MLX</span>' : ""}</td>
+          <td>${m.pipeline_tag ? escapeHtml(m.pipeline_tag) : "—"}</td>
+        </tr>`
+      )
+      .join("");
+
+    resultsDiv.innerHTML = `
+      <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:0.5rem;">
+        ${data.count} results for "${escapeHtml(query)}"
+      </p>
+      <table>
+        <thead><tr>
+          <th>Repository</th><th>Downloads</th><th>Likes</th>
+          <th>Format</th><th>Pipeline</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+
+    resultsDiv.querySelectorAll("tr[data-repo]").forEach((tr) => {
+      tr.addEventListener("click", () => showRepoFiles(tr.dataset.repo));
+    });
+  } catch (err) {
+    resultsDiv.innerHTML = `<p class="placeholder" style="color:var(--danger)">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function showRepoFiles(repoId) {
+  const filesDiv = document.getElementById("hub-files");
+  filesDiv.style.display = "block";
+  filesDiv.innerHTML = `<h3>${escapeHtml(repoId)}</h3><p class="loading">Loading files…</p>`;
+
+  try {
+    const data = await api.get(`/hub/files/${repoId}`);
+
+    if (data.files.length === 0) {
+      filesDiv.innerHTML = `<h3>${escapeHtml(repoId)}</h3><p class="placeholder">No files found.</p>`;
+      return;
+    }
+
+    const rows = data.files
+      .map(
+        (f) => `<tr>
+          <td>${escapeHtml(f.filename)}</td>
+          <td>${f.size > 0 ? formatSizeGb(f.size / (1024 * 1024 * 1024)) : "—"}</td>
+        </tr>`
+      )
+      .join("");
+
+    filesDiv.innerHTML = `
+      <h3>${escapeHtml(repoId)} <span style="color:var(--text-muted);font-size:0.85rem">(${data.files.length} files)</span></h3>
+      <table>
+        <thead><tr><th>Filename</th><th>Size</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  } catch (err) {
+    filesDiv.innerHTML = `<h3>${escapeHtml(repoId)}</h3><p class="placeholder" style="color:var(--danger)">${escapeHtml(err.message)}</p>`;
+  }
+}
+
 // ── Placeholder Tab Renderers ───────────────────────────────────────────────
-
-async function loadLocalModels() {
-  // Will be implemented in Phase 4
-}
-
-async function loadHub() {
-  // Will be implemented in Phase 4
-}
 
 async function loadBenchmark() {
   // Will be implemented in Phase 5
@@ -387,5 +534,24 @@ document.addEventListener("DOMContentLoaded", () => {
 
   document.getElementById("compat-family-select").addEventListener("change", () => {
     if (document.getElementById("hw-select").value) runAnalysis();
+  });
+
+  // Local Models tab
+  document.getElementById("scan-btn").addEventListener("click", () => scanLocalModels());
+  document.getElementById("scan-custom-btn").addEventListener("click", () => {
+    const dir = document.getElementById("custom-dir-input").value.trim();
+    if (dir) scanLocalModels(dir);
+  });
+
+  // HuggingFace tab
+  document.getElementById("hub-search-input").addEventListener("input", () => {
+    clearTimeout(hubDebounceTimer);
+    hubDebounceTimer = setTimeout(searchHub, 300);
+  });
+  document.getElementById("hub-format-select").addEventListener("change", () => {
+    if (document.getElementById("hub-search-input").value.trim()) searchHub();
+  });
+  document.getElementById("hub-sort-select").addEventListener("change", () => {
+    if (document.getElementById("hub-search-input").value.trim()) searchHub();
   });
 });

@@ -55,12 +55,40 @@
 
     <section id="tab-local" class="tab-content">
       <h2>Local Models</h2>
-      <p class="placeholder">Scan your Mac for locally downloaded models.</p>
+      <div class="controls">
+        <button class="btn" id="scan-btn">Scan Default Paths</button>
+        <label>Custom Directory
+          <input type="text" id="custom-dir-input" placeholder="/path/to/models" style="min-width:250px">
+        </label>
+        <button class="btn" id="scan-custom-btn" style="background:var(--bg-card);color:var(--text);border:1px solid var(--border)">Scan Custom</button>
+      </div>
+      <div id="scan-summary"></div>
+      <div id="scan-results"></div>
     </section>
 
     <section id="tab-hub" class="tab-content">
       <h2>HuggingFace Search</h2>
-      <p class="placeholder">Search HuggingFace for GGUF and MLX models.</p>
+      <div class="controls">
+        <label>Search
+          <input type="text" id="hub-search-input" placeholder="llama 8b gguf…" style="min-width:250px">
+        </label>
+        <label>Format
+          <select id="hub-format-select">
+            <option value="">All</option>
+            <option value="gguf">GGUF</option>
+            <option value="mlx">MLX</option>
+          </select>
+        </label>
+        <label>Sort
+          <select id="hub-sort-select">
+            <option value="downloads">Downloads</option>
+            <option value="likes">Likes</option>
+            <option value="lastModified">Recent</option>
+          </select>
+        </label>
+      </div>
+      <div id="hub-results"></div>
+      <div id="hub-files" class="detail-panel" style="display:none;"></div>
     </section>
 
     <section id="tab-benchmark" class="tab-content">
