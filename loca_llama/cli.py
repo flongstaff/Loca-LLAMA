@@ -208,6 +208,10 @@ def build_parser() -> argparse.ArgumentParser:
     rec.add_argument("--use-case", choices=["general", "coding", "reasoning", "small", "large-context"],
                      default="general", help="Intended use case")
 
+    # ── scan ──
+    scan = sub.add_parser("scan", help="Scan for locally downloaded models")
+    scan.add_argument("--dir", help="Custom directory to scan")
+
     return parser
 
 
@@ -445,6 +449,35 @@ def cmd_recommend(args) -> None:
         print()
 
 
+def cmd_scan(args) -> None:
+    from .scanner import scan_all, scan_custom_dir
+
+    if args.dir:
+        models = scan_custom_dir(args.dir)
+    else:
+        models = scan_all()
+
+    if not models:
+        print(f"{YELLOW}No models found.{RESET}")
+        return
+
+    print_header("Local Models")
+    print(f"  Found {GREEN}{len(models)}{RESET} model(s):\n")
+
+    source_colors = {
+        "lm-studio": MAGENTA, "llama.cpp": CYAN, "ollama": GREEN,
+        "huggingface": YELLOW, "mlx-community": GREEN,
+    }
+
+    for i, m in enumerate(models, 1):
+        sc = source_colors.get(m.source, WHITE)
+        quant_str = f" [{m.quant}]" if m.quant else ""
+        print(
+            f"  {i:>3}) {BOLD}{m.name}{RESET}{quant_str}\n"
+            f"       {format_size(m.size_gb):>8}  {sc}{m.source:<14}{RESET}  {m.format:<10}  {DIM}{m.path}{RESET}"
+        )
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
@@ -461,6 +494,7 @@ def main() -> None:
         "detail": lambda: cmd_detail(args),
         "max-context": lambda: cmd_max_context(args),
         "recommend": lambda: cmd_recommend(args),
+        "scan": lambda: cmd_scan(args),
     }
 
     commands[args.command]()

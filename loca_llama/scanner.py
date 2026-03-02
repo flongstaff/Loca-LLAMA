@@ -1,7 +1,8 @@
-"""Scan for locally downloaded LLM models from LM Studio and llama.cpp."""
+"""Scan for locally downloaded LLM models from LM Studio, llama.cpp, and Ollama."""
 
-import os
+import json
 import re
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -13,8 +14,8 @@ class LocalModel:
     name: str
     path: Path
     size_gb: float
-    format: str  # "gguf", "mlx", "safetensors", "bin"
-    source: str  # "lm-studio", "llama.cpp", "huggingface", "mlx-community", "unknown"
+    format: str  # "gguf", "mlx", "safetensors", "bin", "ollama"
+    source: str  # "lm-studio", "llama.cpp", "huggingface", "mlx-community", "ollama", "unknown"
     quant: str | None = None  # Detected quantization from filename
     family: str | None = None  # Detected model family
     repo_id: str | None = None  # HuggingFace repo id if detectable
@@ -204,6 +205,48 @@ def scan_mlx_models(directory: Path) -> list[LocalModel]:
     return models
 
 
+def scan_ollama_models() -> list[LocalModel]:
+    """Get models from Ollama's API and local blob storage."""
+    models = []
+    try:
+        req = urllib.request.Request(
+            "http://127.0.0.1:11434/api/tags",
+            headers={"User-Agent": "loca-llama/0.1"},
+        )
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception:
+        return models
+
+    # Ollama blobs stored here on macOS
+    ollama_dir = Path.home() / ".ollama" / "models"
+
+    for m in data.get("models", []):
+        name = m.get("name", "")
+        size_bytes = m.get("size", 0)
+        details = m.get("details", {})
+        quant_level = details.get("quantization_level")
+        param_size = details.get("parameter_size", "")
+        family_name = details.get("family", "")
+
+        models.append(LocalModel(
+            name=name,
+            path=ollama_dir / "manifests" / name.replace(":", "/"),
+            size_gb=size_bytes / (1024**3),
+            format="ollama",
+            source="ollama",
+            quant=quant_level,
+            family=family_name.capitalize() if family_name else detect_family(name),
+            metadata={
+                "parameter_size": param_size,
+                "family": family_name,
+                "format": details.get("format", ""),
+            },
+        ))
+
+    return models
+
+
 def scan_all() -> list[LocalModel]:
     """Scan all known locations for downloaded models."""
     all_models: list[LocalModel] = []
@@ -216,6 +259,8 @@ def scan_all() -> list[LocalModel]:
 
     for path in HUGGINGFACE_PATHS:
         all_models.extend(scan_mlx_models(path))
+
+    all_models.extend(scan_ollama_models())
 
     # Deduplicate by path
     seen_paths: set[Path] = set()
