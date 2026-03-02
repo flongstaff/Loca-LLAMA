@@ -1,0 +1,109 @@
+# Implementation Record: Loca-LLAMA v2 Webapp
+
+**Feature**: loca-llama-v2
+**Started**: 2026-03-02
+**Status**: IN_PROGRESS
+
+**Reference**:
+- Plan: `rpi/loca-llama-v2/plan/PLAN.md`
+- Technical Design: `rpi/loca-llama-v2/plan/eng.md`
+- Product Requirements: `rpi/loca-llama-v2/plan/pm.md`
+
+**Verification Commands**:
+```bash
+.venv/bin/pip install -e ".[web,dev]"
+.venv/bin/python -m pytest tests/ -v
+.venv/bin/uvicorn loca_llama.api.app:app --reload
+```
+
+---
+
+## Phase 1: Foundation
+
+**Date**: 2026-03-02
+**Verdict**: PASS
+
+### Deliverables
+- [x] Task 1.1: pyproject.toml — web/dev optional deps, entry point, pytest config
+- [x] Task 1.2: App factory — create_app(), lifespan, StaticFiles mount, serve() CLI
+- [x] Task 1.3: State + DI — AppState, BenchmarkJob, get_state() dependency
+- [x] Task 1.4: Pydantic schemas — ~28 request/response models in schemas.py
+- [x] Task 1.5: Route stubs — 10 route files, 21 endpoints returning 501
+- [x] Task 1.6: Static frontend shell — 6-tab SPA (index.html, style.css, app.js)
+- [x] Task 1.7: Test infrastructure — conftest.py with shared fixtures
+
+### Files Created
+| File | Lines |
+|------|-------|
+| `loca_llama/api/__init__.py` | 4 |
+| `loca_llama/api/app.py` | 75 |
+| `loca_llama/api/state.py` | ~60 |
+| `loca_llama/api/dependencies.py` | ~20 |
+| `loca_llama/api/schemas.py` | ~338 |
+| `loca_llama/api/routes/__init__.py` | ~30 |
+| `loca_llama/api/routes/hardware.py` | ~25 |
+| `loca_llama/api/routes/models.py` | ~15 |
+| `loca_llama/api/routes/quantization.py` | ~15 |
+| `loca_llama/api/routes/analysis.py` | ~30 |
+| `loca_llama/api/routes/templates.py` | ~35 |
+| `loca_llama/api/routes/scanner.py` | ~15 |
+| `loca_llama/api/routes/hub.py` | ~30 |
+| `loca_llama/api/routes/benchmark.py` | ~30 |
+| `loca_llama/api/routes/memory.py` | ~20 |
+| `loca_llama/api/routes/runtime.py` | ~15 |
+| `static/index.html` | ~150 |
+| `static/style.css` | ~200 |
+| `static/app.js` | ~150 |
+| `tests/__init__.py` | 1 |
+| `tests/conftest.py` | 39 |
+| `tests/api/__init__.py` | 1 |
+| `tests/api/conftest.py` | 2 |
+
+### Verification
+- Install: PASS (`.venv/bin/pip install -e ".[web,dev]"`)
+- App starts: PASS (21 endpoints + static mount registered)
+- Stubs: PASS (all return 501)
+- Static files: PASS (/ returns index.html with "Loca-LLAMA")
+- Swagger: PASS (/docs returns 200)
+- Pytest infra: PASS (exit code 5 — no tests yet, expected)
+
+### Notes
+- Homebrew Python 3.14 requires venv (PEP 668). Created `.venv/` at project root.
+- macOS lacks GNU `timeout` command. Used Python script for integration tests.
+
+---
+
+## Phase 2: Data Endpoints
+
+**Date**: 2026-03-02
+**Verdict**: PASS
+
+### Deliverables
+- [x] Task 2.1: Hardware endpoints — GET list (44 specs), GET by name with 404
+- [x] Task 2.2: Models endpoint — GET list (49 models) with optional ?family= filter
+- [x] Task 2.3: Quantization endpoint — GET list (13 formats) with recommended list
+- [x] Task 2.4: Template endpoints — GET list, GET match, POST lm-studio-preset, POST llama-cpp-command
+- [x] Task 2.5: Tests — 15 tests across 4 test files, all passing
+- [x] Task 2.6: Frontend wiring — Models table with family filter, Compatibility dropdowns
+
+### Files Changed
+| File | Change | Lines |
+|------|--------|-------|
+| `loca_llama/api/routes/hardware.py` | rewritten (stub → impl) | 55 |
+| `loca_llama/api/routes/models.py` | rewritten (stub → impl) | 40 |
+| `loca_llama/api/routes/quantization.py` | rewritten (stub → impl) | 30 |
+| `loca_llama/api/routes/templates.py` | rewritten (stub → impl) | 80 |
+| `tests/api/test_hardware_routes.py` | new | 37 |
+| `tests/api/test_model_routes.py` | new | 38 |
+| `tests/api/test_quant_routes.py` | new | 29 |
+| `tests/api/test_template_routes.py` | new | 65 |
+| `static/index.html` | modified (dropdowns + table containers) | 75 |
+| `static/app.js` | rewritten (live data loading) | 145 |
+| `static/style.css` | modified (controls layout) | 231 |
+
+### Verification
+- Tests: PASS (15/15 in 0.13s)
+- App starts: PASS (26 routes registered)
+- Endpoints: All 4 data routes return real data; remaining 7 routes still 501
+
+---

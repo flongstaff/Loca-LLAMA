@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loca-LLAMA — Local LLM Mac Analyzer</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Loca-LLAMA</h1>
+    <p class="subtitle">Local LLM Apple Mac Analyzer</p>
+    <nav>
+      <button data-tab="compatibility" class="active">Compatibility</button>
+      <button data-tab="models">Models</button>
+      <button data-tab="local">Local Models</button>
+      <button data-tab="hub">HuggingFace</button>
+      <button data-tab="benchmark">Benchmark</button>
+      <button data-tab="memory">Memory</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="tab-compatibility" class="tab-content active">
+      <h2>Compatibility Check</h2>
+      <div class="controls">
+        <label>Hardware
+          <select id="hw-select"><option value="">Loading…</option></select>
+        </label>
+        <label>Quantization
+          <select id="quant-select"><option value="">Loading…</option></select>
+        </label>
+        <button class="btn" id="analyze-btn" disabled>Analyze</button>
+      </div>
+      <div id="compat-results"></div>
+    </section>
+
+    <section id="tab-models" class="tab-content">
+      <h2>Model Database</h2>
+      <div class="controls">
+        <label>Family
+          <select id="family-select"><option value="">All Families</option></select>
+        </label>
+      </div>
+      <div id="models-table"></div>
+    </section>
+
+    <section id="tab-local" class="tab-content">
+      <h2>Local Models</h2>
+      <p class="placeholder">Scan your Mac for locally downloaded models.</p>
+    </section>
+
+    <section id="tab-hub" class="tab-content">
+      <h2>HuggingFace Search</h2>
+      <p class="placeholder">Search HuggingFace for GGUF and MLX models.</p>
+    </section>
+
+    <section id="tab-benchmark" class="tab-content">
+      <h2>Benchmark</h2>
+      <p class="placeholder">Run benchmarks against local runtimes (LM Studio, llama.cpp).</p>
+    </section>
+
+    <section id="tab-memory" class="tab-content">
+      <h2>Memory Monitor</h2>
+      <p class="placeholder">Monitor unified memory usage in real time.</p>
+    </section>
+  </main>
+
+  <footer>
+    Loca-LLAMA v0.1.0 &middot; localhost:8000
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
