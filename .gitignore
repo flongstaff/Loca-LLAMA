@@ -8,3 +8,5 @@ build/
 *.egg
 .venv/
 venv/
+.coverage
+.claude/settings.local.json
