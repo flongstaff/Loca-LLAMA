@@ -2,7 +2,7 @@
 
 import sys
 
-from .hardware import APPLE_SILICON_SPECS, MacSpec
+from .hardware import APPLE_SILICON_SPECS, MacSpec, detect_mac
 from .models import MODELS
 from .quantization import QUANT_FORMATS, RECOMMENDED_FORMATS
 from .analyzer import (
@@ -189,6 +189,17 @@ def print_separator(title: str = "", char: str = "-", width: int = 65):
 # ── Hardware Selection ───────────────────────────────────────────────────────
 
 def select_hardware() -> MacSpec | None:
+    # Try auto-detect first
+    detected = detect_mac()
+    if detected:
+        key, mac = detected
+        print(f"\n  {GREEN}Detected:{RESET} {BOLD}{key}{RESET}")
+        print(f"    {mac.cpu_cores} CPU cores, {mac.gpu_cores} GPU cores, "
+              f"{mac.memory_gb} GB unified, {mac.memory_bandwidth_gbs:.0f} GB/s")
+        if prompt_yes_no("  Use detected config?", default=True):
+            return mac
+        print()
+
     print(f"\n  {BOLD}{CYAN}Select Your Mac Configuration{RESET}")
     print(f"  {DIM}Choose your Apple Silicon chip and memory{RESET}")
 
