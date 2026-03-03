@@ -1,6 +1,6 @@
 """Tests for templates.py command generation."""
 
-from loca_llama.templates import get_llama_cpp_command, TEMPLATES
+from loca_llama.templates import get_llama_cpp_command, get_llama_cpp_server_command, TEMPLATES
 
 
 def test_llama_cpp_command_uses_jinja_not_interactive():
@@ -55,3 +55,18 @@ def test_llama_cpp_command_partial_overrides():
     assert "--temp 0.9" in cmd
     # Other values should come from template
     assert f"--top-p {tmpl.top_p}" in cmd
+
+
+def test_llama_server_command_includes_flash_attention():
+    """llama-server should include -fa for Apple Silicon."""
+    tmpl = TEMPLATES[0]
+    cmd = get_llama_cpp_server_command(tmpl, "/models/test.gguf")
+    assert "-fa" in cmd
+
+
+def test_llama_server_command_no_interactive_flags():
+    """llama-server should not include --jinja or --color (those are CLI-only)."""
+    tmpl = TEMPLATES[0]
+    cmd = get_llama_cpp_server_command(tmpl, "/models/test.gguf")
+    assert "--jinja" not in cmd
+    assert " -i" not in cmd

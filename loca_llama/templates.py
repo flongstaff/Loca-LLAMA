@@ -439,6 +439,7 @@ def get_llama_cpp_server_command(
         f"--port {port}",
         f"-c {ctx}",
         f"-ngl {n_gpu_layers}",
+        "-fa",
     ]
     parts.extend(template.llama_cpp_flags)
     return " \\\n  ".join(parts)
