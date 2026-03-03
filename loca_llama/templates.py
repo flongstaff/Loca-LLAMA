@@ -395,24 +395,32 @@ def get_llama_cpp_command(
     model_path: str,
     context_length: int | None = None,
     n_gpu_layers: int = -1,
+    sampling_overrides: dict[str, float | int] | None = None,
 ) -> str:
     """Generate the llama.cpp CLI command for this model."""
     ctx = context_length or template.recommended_ctx
+    overrides = sampling_overrides or {}
+    temp = overrides.get("temperature", template.temperature)
+    top_p = overrides.get("top_p", template.top_p)
+    top_k = overrides.get("top_k", template.top_k)
+    rep_pen = overrides.get("repeat_penalty", template.repeat_penalty)
+    min_p = overrides.get("min_p", template.min_p)
+
     parts = [
         "llama-cli",
         f"-m {model_path}",
         f"-c {ctx}",
         f"-ngl {n_gpu_layers}",
-        f"--temp {template.temperature}",
-        f"--top-p {template.top_p}",
-        f"--top-k {template.top_k}",
-        f"--repeat-penalty {template.repeat_penalty}",
-        f"--min-p {template.min_p}",
+        f"--temp {temp}",
+        f"--top-p {top_p}",
+        f"--top-k {top_k}",
+        f"--repeat-penalty {rep_pen}",
+        f"--min-p {min_p}",
     ]
     if template.system_prompt:
         parts.append(f'--system-prompt "{template.system_prompt}"')
     parts.extend(template.llama_cpp_flags)
-    parts.append("-i")  # interactive mode
+    parts.extend(["-fa", "--jinja", "--color"])
     return " \\\n  ".join(parts)
 
 
