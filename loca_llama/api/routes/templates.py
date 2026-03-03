@@ -92,6 +92,7 @@ async def llama_cpp_command(body: LlamaCppCommandRequest) -> LlamaCppCommandResp
             model_path=body.model_path,
             context_length=body.context_length,
             n_gpu_layers=body.n_gpu_layers,
+            sampling_overrides=body.sampling_overrides,
         )
         return LlamaCppCommandResponse(command=cmd)
     except HTTPException:

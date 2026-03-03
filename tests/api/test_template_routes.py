@@ -78,3 +78,35 @@ async def test_llama_cpp_command_not_found(client):
         json={"model_name": "unknown-model-xyz", "model_path": "/models/test.gguf"},
     )
     assert resp.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_llama_cpp_command_with_overrides(client):
+    """Should apply sampling overrides to generated command."""
+    resp = await client.post(
+        "/api/templates/llama-cpp-command",
+        json={
+            "model_name": "llama-3",
+            "model_path": "/models/llama3.gguf",
+            "sampling_overrides": {"temperature": 1.0, "top_p": 0.95},
+        },
+    )
+    assert resp.status_code == 200
+    cmd = resp.json()["command"]
+    assert "--temp 1.0" in cmd
+    assert "--top-p 0.95" in cmd
+
+
+@pytest.mark.anyio
+async def test_llama_cpp_command_has_modern_flags(client):
+    """Generated command should use modern llama.cpp flags."""
+    resp = await client.post(
+        "/api/templates/llama-cpp-command",
+        json={"model_name": "llama-3", "model_path": "/models/llama3.gguf"},
+    )
+    assert resp.status_code == 200
+    cmd = resp.json()["command"]
+    assert "--jinja" in cmd
+    assert "--color" in cmd
+    assert "-fa" in cmd
+    assert " -i" not in cmd

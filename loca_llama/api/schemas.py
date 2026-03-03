@@ -218,6 +218,7 @@ class LlamaCppCommandRequest(BaseModel):
     model_path: str
     context_length: int | None = None
     n_gpu_layers: int = -1
+    sampling_overrides: dict[str, float | int] | None = None
 
 
 class LlamaCppCommandResponse(BaseModel):
