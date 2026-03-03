@@ -62,6 +62,8 @@ APPLE_SILICON_SPECS: dict[str, MacSpec] = {
     "M4 32GB": MacSpec("M4", 10, 10, 16, 32, 120.0, 4.6),
     "M4 Pro 24GB": MacSpec("M4 Pro", 12, 16, 16, 24, 273.0, 7.5),
     "M4 Pro 48GB": MacSpec("M4 Pro", 12, 16, 16, 48, 273.0, 7.5),
+    "M4 Pro 24GB (14C)": MacSpec("M4 Pro", 14, 20, 16, 24, 273.0, 9.4),
+    "M4 Pro 48GB (14C)": MacSpec("M4 Pro", 14, 20, 16, 48, 273.0, 9.4),
     "M4 Max 36GB": MacSpec("M4 Max", 16, 40, 16, 36, 546.0, 18.7),
     "M4 Max 48GB": MacSpec("M4 Max", 16, 40, 16, 48, 546.0, 18.7),
     "M4 Max 64GB": MacSpec("M4 Max", 16, 40, 16, 64, 546.0, 18.7),
