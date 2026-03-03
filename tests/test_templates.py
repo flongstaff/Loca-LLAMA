@@ -70,3 +70,13 @@ def test_llama_server_command_no_interactive_flags():
     cmd = get_llama_cpp_server_command(tmpl, "/models/test.gguf")
     assert "--jinja" not in cmd
     assert " -i" not in cmd
+
+
+def test_detect_non_gguf_format():
+    """Should detect non-GGUF model formats from path."""
+    from loca_llama.templates import detect_model_format_warning
+
+    assert detect_model_format_warning("/models/mlx-community/Qwen-4bit") is not None
+    assert detect_model_format_warning("/models/model.safetensors") is not None
+    assert detect_model_format_warning("/models/model.gguf") is None
+    assert detect_model_format_warning("/models/some-model/Q4_K_M.gguf") is None

@@ -443,3 +443,15 @@ def get_llama_cpp_server_command(
     ]
     parts.extend(template.llama_cpp_flags)
     return " \\\n  ".join(parts)
+
+
+def detect_model_format_warning(model_path: str) -> str | None:
+    """Return a warning string if the model path suggests a non-GGUF format."""
+    path_lower = model_path.lower()
+    if "mlx" in path_lower:
+        return "This model appears to be MLX format — llama-cli requires GGUF"
+    if path_lower.endswith(".safetensors"):
+        return "This model appears to be safetensors format — llama-cli requires GGUF"
+    if path_lower.endswith(".bin") and "pytorch" in path_lower:
+        return "This model appears to be PyTorch format — llama-cli requires GGUF"
+    return None

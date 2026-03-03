@@ -19,7 +19,7 @@ from .benchmark import (
     run_benchmark_suite, aggregate_results,
     benchmark_llama_cpp_native, BENCH_PROMPTS,
 )
-from .templates import get_template, get_lm_studio_preset, get_llama_cpp_command, get_llama_cpp_server_command
+from .templates import get_template, get_lm_studio_preset, get_llama_cpp_command, get_llama_cpp_server_command, detect_model_format_warning
 from .memory_monitor import (
     MemoryMonitor, MemoryReport, get_memory_sample,
     memory_bar, format_memory_report, format_mini_memory_bar, pressure_badge,
@@ -562,6 +562,10 @@ def _show_template(mac: MacSpec, m: LocalModel):
             "repeat_penalty": rep_pen,
             "min_p": tmpl.min_p,
         }
+
+        format_warning = detect_model_format_warning(str(m.path))
+        if format_warning:
+            print(f"\n  {YELLOW}Warning: {format_warning}{RESET}")
 
         print(f"\n  {BOLD}{CYAN}llama.cpp Command:{RESET}")
         cmd = get_llama_cpp_command(tmpl, str(m.path), sampling_overrides=sampling_overrides)
