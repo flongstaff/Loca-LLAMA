@@ -17,6 +17,7 @@
       <button data-tab="hub">HuggingFace</button>
       <button data-tab="benchmark">Benchmark</button>
       <button data-tab="memory">Memory</button>
+      <button data-tab="calculator">Calculator</button>
     </nav>
   </header>
 
@@ -116,6 +117,58 @@
       </div>
       <div id="bench-status"></div>
       <div id="bench-results"></div>
+    </section>
+
+    <section id="tab-calculator" class="tab-content">
+      <h2>VRAM Calculator</h2>
+      <div class="controls calculator-controls">
+        <label>Auto-fill from model
+          <select id="calc-model-select"><option value="">Custom parameters…</option></select>
+        </label>
+      </div>
+      <div class="calculator-grid">
+        <div class="calculator-inputs">
+          <h3>Model Parameters</h3>
+          <label>Parameters (Billion)
+            <input type="number" id="calc-params" value="7" min="0.1" max="1000" step="0.1">
+          </label>
+          <label>Bits per Weight
+            <input type="number" id="calc-bpw" value="4.85" min="1" max="32" step="0.05">
+          </label>
+          <label>Layers
+            <input type="number" id="calc-layers" value="32" min="1" max="200" step="1">
+          </label>
+          <label>KV Heads
+            <input type="number" id="calc-kv-heads" value="8" min="1" max="128" step="1">
+          </label>
+          <label>Head Dimension
+            <input type="number" id="calc-head-dim" value="128" min="32" max="512" step="8">
+          </label>
+          <label>Context Length
+            <input type="range" id="calc-context-range" min="7" max="18" value="13" step="0.1">
+            <span id="calc-context-label">8192</span>
+          </label>
+          <label>KV Cache Bits
+            <select id="calc-kv-bits">
+              <option value="16" selected>FP16 (16-bit)</option>
+              <option value="8">INT8 (8-bit)</option>
+              <option value="4">INT4 (4-bit)</option>
+            </select>
+          </label>
+        </div>
+        <div class="calculator-results">
+          <h3>Memory Estimate</h3>
+          <div id="calc-breakdown" class="detail-grid">
+            <div class="detail-item"><span class="label">Model Size</span><span class="value" id="calc-model-size">--</span></div>
+            <div class="detail-item"><span class="label">KV Cache</span><span class="value" id="calc-kv-cache">--</span></div>
+            <div class="detail-item"><span class="label">Overhead</span><span class="value" id="calc-overhead">--</span></div>
+            <div class="detail-item"><span class="label">Total Memory</span><span class="value" id="calc-total" style="font-weight:bold">--</span></div>
+            <div class="detail-item"><span class="label">On-Disk Size</span><span class="value" id="calc-disk-size">--</span></div>
+          </div>
+          <h3>Compatible Hardware</h3>
+          <div id="calc-hardware-table"></div>
+        </div>
+      </div>
     </section>
 
     <section id="tab-memory" class="tab-content">

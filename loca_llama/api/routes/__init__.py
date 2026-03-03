@@ -12,6 +12,7 @@ from .quantization import router as quantization_router
 from .runtime import router as runtime_router
 from .scanner import router as scanner_router
 from .templates import router as templates_router
+from .calculator import router as calculator_router
 
 all_routers = [
     hardware_router,
@@ -24,4 +25,5 @@ all_routers = [
     benchmark_router,
     memory_router,
     runtime_router,
+    calculator_router,
 ]

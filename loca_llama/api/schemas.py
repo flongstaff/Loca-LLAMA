@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -122,6 +124,53 @@ class MaxContextResponse(BaseModel):
     quant_name: str
     max_context_length: int
     max_context_k: str
+
+
+# ── Calculator ──────────────────────────────────────────────────────────────
+
+class CalculatorEstimateRequest(BaseModel):
+    params_billion: float = Field(..., ge=0.1, le=1000.0)
+    bits_per_weight: float = Field(..., ge=1.0, le=32.0)
+    context_length: int = Field(..., ge=128, le=262144)
+    num_layers: int = Field(..., ge=1, le=200)
+    num_kv_heads: int = Field(..., ge=1, le=128)
+    head_dim: int = Field(..., ge=32, le=512)
+    kv_bits: Literal[4, 8, 16] = 16
+
+
+class HardwareCompatibilityItem(BaseModel):
+    name: str
+    memory_gb: int
+    tier: str
+    tier_label: str
+    headroom_gb: float
+    estimated_tok_per_sec: float | None
+
+
+class CalculatorEstimateResponse(BaseModel):
+    model_size_gb: float
+    kv_cache_gb: float
+    overhead_gb: float
+    total_memory_gb: float
+    on_disk_size_gb: float
+    compatible_hardware: list[HardwareCompatibilityItem]
+
+
+class CalculatorModelItem(BaseModel):
+    name: str
+    family: str
+    params_billion: float
+    num_layers: int
+    num_kv_heads: int
+    head_dim: int
+    default_context_length: int
+    max_context_length: int
+
+
+class CalculatorModelsResponse(BaseModel):
+    models: list[CalculatorModelItem]
+    count: int
+    families: list[str]
 
 
 # ── Templates ────────────────────────────────────────────────────────────────

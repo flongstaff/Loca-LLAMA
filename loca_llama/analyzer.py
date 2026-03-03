@@ -90,12 +90,14 @@ def estimate_model_size_gb(params_billion: float, bits_per_weight: float) -> flo
     return (params_billion * 1e9 * bits_per_weight / 8) / (1024**3)
 
 
-def estimate_kv_cache_gb(
-    model: LLMModel,
+def estimate_kv_cache_raw(
+    num_layers: int,
+    num_kv_heads: int,
+    head_dim: int,
     context_length: int,
     kv_bits: int = 16,
 ) -> float:
-    """Estimate KV cache memory in GB.
+    """Estimate KV cache memory in GB from raw architecture parameters.
 
     Formula: 2 * num_layers * num_kv_heads * head_dim * context_length * (kv_bits/8)
 
@@ -104,13 +106,24 @@ def estimate_kv_cache_gb(
     bytes_per_element = kv_bits / 8
     kv_cache_bytes = (
         2
-        * model.num_layers
-        * model.num_kv_heads
-        * model.head_dim
+        * num_layers
+        * num_kv_heads
+        * head_dim
         * context_length
         * bytes_per_element
     )
     return kv_cache_bytes / (1024**3)
+
+
+def estimate_kv_cache_gb(
+    model: LLMModel,
+    context_length: int,
+    kv_bits: int = 16,
+) -> float:
+    """Estimate KV cache memory in GB for a specific model."""
+    return estimate_kv_cache_raw(
+        model.num_layers, model.num_kv_heads, model.head_dim, context_length, kv_bits
+    )
 
 
 def estimate_overhead_gb(model_size_gb: float) -> float:

@@ -9,6 +9,7 @@ from loca_llama.analyzer import (
     analyze_model,
     compute_tier,
     estimate_kv_cache_gb,
+    estimate_kv_cache_raw,
     estimate_model_size_gb,
     estimate_overhead_gb,
     max_context_for_model,
@@ -59,6 +60,41 @@ class TestEstimateKvCache:
     def test_kv_cache_positive(self, qwen_32b):
         kv = estimate_kv_cache_gb(qwen_32b, 4096)
         assert kv > 0
+
+
+class TestEstimateKvCacheRaw:
+    def test_known_value(self):
+        """32 layers, 8 KV heads, 128 dim, 8192 ctx, FP16 should be ~0.5 GB."""
+        kv = estimate_kv_cache_raw(32, 8, 128, 8192, kv_bits=16)
+        expected = 2 * 32 * 8 * 128 * 8192 * 2 / (1024**3)
+        assert abs(kv - expected) < 0.001
+
+    def test_int4_is_quarter_of_fp16(self):
+        """INT4 KV cache should be exactly 1/4 of FP16."""
+        fp16 = estimate_kv_cache_raw(32, 8, 128, 8192, kv_bits=16)
+        int4 = estimate_kv_cache_raw(32, 8, 128, 8192, kv_bits=4)
+        assert abs(fp16 / int4 - 4.0) < 0.01
+
+    def test_scales_with_context(self):
+        """Doubling context should double KV cache."""
+        kv_4k = estimate_kv_cache_raw(32, 8, 128, 4096)
+        kv_8k = estimate_kv_cache_raw(32, 8, 128, 8192)
+        assert abs(kv_8k / kv_4k - 2.0) < 0.01
+
+    def test_default_kv_bits_is_fp16(self):
+        """Default kv_bits should be 16 (FP16)."""
+        default = estimate_kv_cache_raw(32, 8, 128, 8192)
+        explicit = estimate_kv_cache_raw(32, 8, 128, 8192, kv_bits=16)
+        assert default == explicit
+
+    def test_delegates_from_estimate_kv_cache_gb(self, qwen_32b):
+        """estimate_kv_cache_gb should match estimate_kv_cache_raw for same params."""
+        gb_result = estimate_kv_cache_gb(qwen_32b, 8192)
+        raw_result = estimate_kv_cache_raw(
+            qwen_32b.num_layers, qwen_32b.num_kv_heads,
+            qwen_32b.head_dim, 8192, kv_bits=16,
+        )
+        assert abs(gb_result - raw_result) < 0.001
 
 
 class TestEstimateOverhead:
