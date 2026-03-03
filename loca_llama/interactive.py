@@ -892,11 +892,18 @@ def _show_model_download(mac: MacSpec, model: HubModel):
 def screen_detail(mac: MacSpec):
     print(f"\n  {BOLD}{CYAN}Detailed Model Analysis{RESET}")
 
-    model_names = [f"{m.name} ({m.params_billion}B)" for m in MODELS]
+    families = sorted(set(m.family for m in MODELS))
+    family_options = ["All families"] + families
+    fidx = prompt_choice("Filter by model family:", family_options)
+    if fidx is None:
+        return
+    filtered = MODELS if fidx == 0 else [m for m in MODELS if m.family == families[fidx - 1]]
+
+    model_names = [f"{m.name} ({m.params_billion}B)" for m in filtered]
     idx = prompt_choice("Select model:", model_names)
     if idx is None:
         return
-    model = MODELS[idx]
+    model = filtered[idx]
 
     quant_options = [
         f"{q} -- {QUANT_FORMATS[q].bits_per_weight:.1f} bpw ({QUANT_FORMATS[q].quality_rating})"
