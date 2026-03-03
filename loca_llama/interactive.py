@@ -1082,6 +1082,7 @@ def main_interactive():
         sys.exit(0)
 
     while True:
+        clear_screen()
         runtimes = detect_all_runtimes()
         rt_str = " | ".join(runtime_badge(r.name) for r in runtimes) if runtimes else f"{DIM}no runtimes detected{RESET}"
 
