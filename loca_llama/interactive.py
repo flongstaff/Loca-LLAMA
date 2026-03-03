@@ -554,8 +554,17 @@ def _show_template(mac: MacSpec, m: LocalModel):
         print(f"    Min P:          {preset['inference_params']['min_p']}")
         print(f"    Repeat Penalty: {preset['inference_params']['repeat_penalty']}")
 
+        # Build sampling overrides from HF-merged values
+        sampling_overrides = {
+            "temperature": temp,
+            "top_p": top_p,
+            "top_k": top_k,
+            "repeat_penalty": rep_pen,
+            "min_p": tmpl.min_p,
+        }
+
         print(f"\n  {BOLD}{CYAN}llama.cpp Command:{RESET}")
-        cmd = get_llama_cpp_command(tmpl, str(m.path))
+        cmd = get_llama_cpp_command(tmpl, str(m.path), sampling_overrides=sampling_overrides)
         for line in cmd.split("\n"):
             print(f"    {GREEN}{line}{RESET}")
 
