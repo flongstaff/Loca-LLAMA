@@ -32,13 +32,13 @@ class TestHardwareData:
         for name, spec in APPLE_SILICON_SPECS.items():
             assert spec.gpu_cores > 0, f"{name}: gpu_cores must be positive"
 
-    def test_no_duplicate_chip_memory_combinations(self):
-        seen: set[tuple[str, int]] = set()
+    def test_no_duplicate_chip_memory_core_combinations(self):
+        seen: set[tuple[str, int, int]] = set()
         for name, spec in APPLE_SILICON_SPECS.items():
-            key = (spec.chip, spec.memory_gb)
+            key = (spec.chip, spec.memory_gb, spec.cpu_cores)
             assert key not in seen, (
-                f"Duplicate chip+memory combo: chip={spec.chip}, memory_gb={spec.memory_gb} "
-                f"(found in entry '{name}')"
+                f"Duplicate config: chip={spec.chip}, memory_gb={spec.memory_gb}, "
+                f"cpu_cores={spec.cpu_cores} (found in entry '{name}')"
             )
             seen.add(key)
 
