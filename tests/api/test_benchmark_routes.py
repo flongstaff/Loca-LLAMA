@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from unittest.mock import patch
 
 import pytest
@@ -244,3 +245,162 @@ async def test_poll_failed_job(mock_run, mock_detect, client):
     data = resp.json()
     assert data["status"] == "error"
     assert data["error"] is not None
+
+
+# ── Stream Tests ───────────────────────────────────────────────────────────
+
+
+def _mock_streaming_generator(tokens: list[str]):
+    """Return a generator that yields (token_text, elapsed_ms) tuples."""
+    def gen(*args, **kwargs):
+        for i, tok in enumerate(tokens, 1):
+            yield (tok, float(i * 100))
+    return gen
+
+
+@pytest.mark.anyio
+@patch("loca_llama.api.routes.benchmark.detect_all_runtimes", return_value=MOCK_RUNTIMES)
+@patch(
+    "loca_llama.api.routes.benchmark.benchmark_openai_api_streaming",
+    side_effect=_mock_streaming_generator(["Hello", " world", "!"]),
+)
+async def test_stream_returns_sse_events(mock_stream, mock_detect, client):
+    """GET /api/benchmark/stream returns SSE token and done events."""
+    resp = await client.get("/api/benchmark/stream", params={
+        "runtime_name": "lm-studio",
+        "model_id": "llama-3-8b-q4_k_m",
+        "prompt_type": "default",
+    })
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers["content-type"]
+
+    # Parse SSE events from response body
+    lines = resp.text.strip().split("\n")
+    events = []
+    current_event = {}
+    for line in lines:
+        if line.startswith("event: "):
+            current_event["event"] = line[7:]
+        elif line.startswith("data: "):
+            current_event["data"] = json.loads(line[6:])
+            events.append(current_event)
+            current_event = {}
+
+    # Should have 3 token events + 1 done event
+    token_events = [e for e in events if e.get("event") == "token"]
+    done_events = [e for e in events if e.get("event") == "done"]
+    assert len(token_events) == 3
+    assert len(done_events) == 1
+    assert token_events[0]["data"]["text"] == "Hello"
+    assert done_events[0]["data"]["tokens"] == 3
+
+
+@pytest.mark.anyio
+@patch("loca_llama.api.routes.benchmark.detect_all_runtimes", return_value=MOCK_RUNTIMES)
+async def test_stream_unknown_runtime_returns_400(mock_detect, client):
+    """GET /api/benchmark/stream with unknown runtime returns 400."""
+    resp = await client.get("/api/benchmark/stream", params={
+        "runtime_name": "nonexistent-runtime",
+        "model_id": "llama-3-8b-q4_k_m",
+        "prompt_type": "default",
+    })
+    assert resp.status_code == 400
+    assert "not found" in resp.json()["detail"].lower()
+
+
+@pytest.mark.anyio
+@patch("loca_llama.api.routes.benchmark.detect_all_runtimes", return_value=MOCK_RUNTIMES)
+async def test_stream_unknown_model_returns_400(mock_detect, client):
+    """GET /api/benchmark/stream with unknown model returns 400."""
+    resp = await client.get("/api/benchmark/stream", params={
+        "runtime_name": "lm-studio",
+        "model_id": "nonexistent-model",
+        "prompt_type": "default",
+    })
+    assert resp.status_code == 400
+    assert "not loaded" in resp.json()["detail"].lower()
+
+
+@pytest.mark.anyio
+async def test_stream_custom_prompt_required(client):
+    """GET /api/benchmark/stream requires custom_prompt for prompt_type=custom."""
+    resp = await client.get("/api/benchmark/stream", params={
+        "runtime_name": "lm-studio",
+        "model_id": "llama-3-8b-q4_k_m",
+        "prompt_type": "custom",
+    })
+    assert resp.status_code == 400
+    assert "custom_prompt" in resp.json()["detail"].lower()
+
+
+@pytest.mark.anyio
+async def test_stream_unknown_prompt_type_returns_400(client):
+    """GET /api/benchmark/stream with invalid prompt_type returns 400."""
+    resp = await client.get("/api/benchmark/stream", params={
+        "runtime_name": "lm-studio",
+        "model_id": "llama-3-8b-q4_k_m",
+        "prompt_type": "nonexistent_type",
+    })
+    assert resp.status_code == 400
+    assert "unknown prompt_type" in resp.json()["detail"].lower()
+
+
+@pytest.mark.anyio
+@patch("loca_llama.api.routes.benchmark.detect_all_runtimes", return_value=MOCK_RUNTIMES)
+@patch(
+    "loca_llama.api.routes.benchmark.benchmark_openai_api_streaming",
+    side_effect=ConnectionError("Connection refused"),
+)
+async def test_stream_error_emits_sse_error_event(mock_stream, mock_detect, client):
+    """GET /api/benchmark/stream emits error SSE event on streaming failure."""
+    resp = await client.get("/api/benchmark/stream", params={
+        "runtime_name": "lm-studio",
+        "model_id": "llama-3-8b-q4_k_m",
+        "prompt_type": "default",
+    })
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers["content-type"]
+
+    lines = resp.text.strip().split("\n")
+    events = []
+    current_event = {}
+    for line in lines:
+        if line.startswith("event: "):
+            current_event["event"] = line[7:]
+        elif line.startswith("data: "):
+            current_event["data"] = json.loads(line[6:])
+            events.append(current_event)
+            current_event = {}
+
+    error_events = [e for e in events if e.get("event") == "error"]
+    assert len(error_events) == 1
+    assert "message" in error_events[0]["data"]
+
+
+@pytest.mark.anyio
+@patch("loca_llama.api.routes.benchmark.detect_all_runtimes", return_value=MOCK_RUNTIMES)
+@patch("loca_llama.api.routes.benchmark.benchmark_openai_api_streaming")
+async def test_stream_custom_prompt_forwarded(mock_stream, mock_detect, client):
+    """GET /api/benchmark/stream forwards custom_prompt to the streaming function."""
+    mock_stream.side_effect = _mock_streaming_generator(["ok"])
+
+    resp = await client.get("/api/benchmark/stream", params={
+        "runtime_name": "lm-studio",
+        "model_id": "llama-3-8b-q4_k_m",
+        "prompt_type": "custom",
+        "custom_prompt": "  My custom prompt  ",
+    })
+    assert resp.status_code == 200
+
+    # Verify the streaming function received the stripped custom prompt
+    mock_stream.assert_called_once()
+    call_args = mock_stream.call_args
+    assert call_args[0][2] == "My custom prompt"  # 3rd positional arg = prompt
+
+
+@pytest.mark.anyio
+async def test_prompts_include_json_type(client):
+    """GET /api/benchmark/prompts includes 'json' prompt type."""
+    resp = await client.get("/api/benchmark/prompts")
+    assert resp.status_code == 200
+    assert "json" in resp.json()["prompts"]

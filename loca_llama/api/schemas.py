@@ -316,8 +316,9 @@ class BenchmarkStartRequest(BaseModel):
     model_id: str
     prompt_type: str = "default"
     num_runs: int = Field(default=3, ge=1, le=10)
-    max_tokens: int = 200
+    max_tokens: int = Field(default=200, ge=1, le=4096)
     context_length: int = 4096
+    custom_prompt: str | None = None
 
 
 class BenchmarkStartResponse(BaseModel):

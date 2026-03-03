@@ -108,14 +108,31 @@
             <option value="coding">Coding</option>
             <option value="reasoning">Reasoning</option>
             <option value="creative">Creative</option>
+            <option value="json">JSON</option>
+            <option value="custom">Custom…</option>
           </select>
         </label>
         <label>Runs
           <input type="number" id="bench-runs-input" value="3" min="1" max="10" style="width:60px">
         </label>
         <button class="btn" id="bench-start-btn" disabled>Start Benchmark</button>
+        <button class="btn" id="bench-stream-btn" disabled>Stream</button>
+      </div>
+      <div id="bench-custom-prompt" style="display:none;margin-top:0.5rem;">
+        <textarea id="bench-custom-prompt-text" rows="3" placeholder="Enter your custom prompt…" style="width:100%;resize:vertical;"></textarea>
       </div>
       <div id="bench-status"></div>
+      <div id="bench-stream-output" style="display:none;">
+        <div class="detail-panel" style="display:block;margin-bottom:1rem;">
+          <div class="detail-grid" id="bench-stream-metrics">
+            <div class="detail-item"><span class="label">Tokens</span><span class="value" id="stream-token-count">0</span></div>
+            <div class="detail-item"><span class="label">tok/s</span><span class="value" id="stream-tok-sec">—</span></div>
+            <div class="detail-item"><span class="label">TTFT</span><span class="value" id="stream-ttft">—</span></div>
+            <div class="detail-item"><span class="label">Elapsed</span><span class="value" id="stream-elapsed">—</span></div>
+          </div>
+        </div>
+        <pre id="bench-stream-text" style="white-space:pre-wrap;max-height:300px;overflow-y:auto;padding:1rem;background:var(--surface);border-radius:8px;"></pre>
+      </div>
       <div id="bench-results"></div>
     </section>
 

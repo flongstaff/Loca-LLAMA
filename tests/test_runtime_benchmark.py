@@ -24,6 +24,7 @@ from loca_llama.benchmark import (
     aggregate_results,
     benchmark_llama_cpp_native,
     benchmark_openai_api,
+    benchmark_openai_api_streaming,
     detect_all_runtimes,
     detect_llama_cpp_server,
     detect_lm_studio,
@@ -934,3 +935,116 @@ class TestDetectAllRuntimes:
              patch("loca_llama.benchmark.detect_llama_cpp_server", return_value=lcp):
             result = detect_all_runtimes()
         assert len(result) == 2
+
+
+# ── benchmark_openai_api_streaming ────────────────────────────────────────────
+
+
+def _sse_response(events: list[str]) -> MagicMock:
+    """Build a mock that simulates byte-by-byte SSE streaming.
+
+    Each event string should be a complete SSE line (e.g. 'data: {...}').
+    Lines are joined with newlines and converted to a BytesIO for read(1).
+    """
+    raw = "\n".join(events) + "\n"
+    stream = BytesIO(raw.encode())
+    resp = MagicMock()
+    resp.read = stream.read
+    resp.__enter__ = lambda s: s
+    resp.__exit__ = MagicMock(return_value=False)
+    return resp
+
+
+class TestBenchmarkOpenaiApiStreaming:
+    def test_should_yield_tokens_from_sse_stream(self):
+        """Successful stream yields (token_text, elapsed_ms) tuples."""
+        events = [
+            'data: {"choices":[{"delta":{"content":"Hello"}}]}',
+            'data: {"choices":[{"delta":{"content":" world"}}]}',
+            "data: [DONE]",
+        ]
+        with patch("urllib.request.urlopen", return_value=_sse_response(events)):
+            tokens = list(benchmark_openai_api_streaming(
+                "http://localhost:1234", "test-model", "Say hi", max_tokens=50,
+            ))
+        assert len(tokens) == 2
+        assert tokens[0][0] == "Hello"
+        assert tokens[1][0] == " world"
+        # Both should have positive elapsed ms
+        assert all(t[1] > 0 for t in tokens)
+
+    def test_should_stop_on_done_signal(self):
+        """Generator terminates cleanly on [DONE]."""
+        events = [
+            'data: {"choices":[{"delta":{"content":"A"}}]}',
+            "data: [DONE]",
+            'data: {"choices":[{"delta":{"content":"B"}}]}',
+        ]
+        with patch("urllib.request.urlopen", return_value=_sse_response(events)):
+            tokens = list(benchmark_openai_api_streaming(
+                "http://localhost:1234", "test-model", "test",
+            ))
+        assert len(tokens) == 1
+        assert tokens[0][0] == "A"
+
+    def test_should_skip_empty_content_deltas(self):
+        """Deltas without content key are skipped."""
+        events = [
+            'data: {"choices":[{"delta":{"role":"assistant"}}]}',
+            'data: {"choices":[{"delta":{"content":"ok"}}]}',
+            "data: [DONE]",
+        ]
+        with patch("urllib.request.urlopen", return_value=_sse_response(events)):
+            tokens = list(benchmark_openai_api_streaming(
+                "http://localhost:1234", "test-model", "test",
+            ))
+        assert len(tokens) == 1
+        assert tokens[0][0] == "ok"
+
+    def test_should_skip_malformed_json_lines(self):
+        """Malformed JSON data lines are silently skipped."""
+        events = [
+            "data: {invalid json}",
+            'data: {"choices":[{"delta":{"content":"valid"}}]}',
+            "data: [DONE]",
+        ]
+        with patch("urllib.request.urlopen", return_value=_sse_response(events)):
+            tokens = list(benchmark_openai_api_streaming(
+                "http://localhost:1234", "test-model", "test",
+            ))
+        assert len(tokens) == 1
+        assert tokens[0][0] == "valid"
+
+    def test_should_skip_sse_comment_lines(self):
+        """SSE comment lines starting with ':' are ignored."""
+        events = [
+            ": this is a comment",
+            'data: {"choices":[{"delta":{"content":"tok"}}]}',
+            "data: [DONE]",
+        ]
+        with patch("urllib.request.urlopen", return_value=_sse_response(events)):
+            tokens = list(benchmark_openai_api_streaming(
+                "http://localhost:1234", "test-model", "test",
+            ))
+        assert len(tokens) == 1
+        assert tokens[0][0] == "tok"
+
+    def test_should_raise_on_connection_error(self):
+        """Connection errors propagate to caller."""
+        with patch("urllib.request.urlopen", side_effect=ConnectionError("refused")):
+            with pytest.raises(ConnectionError):
+                list(benchmark_openai_api_streaming(
+                    "http://localhost:1234", "test-model", "test",
+                ))
+
+    def test_should_send_stream_true_in_request(self):
+        """Request payload includes stream: true."""
+        events = ["data: [DONE]"]
+        with patch("urllib.request.urlopen", return_value=_sse_response(events)) as mock_open:
+            list(benchmark_openai_api_streaming(
+                "http://localhost:1234", "test-model", "test",
+            ))
+        req = mock_open.call_args[0][0]
+        body = json.loads(req.data)
+        assert body["stream"] is True
+        assert body["model"] == "test-model"

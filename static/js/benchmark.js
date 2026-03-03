@@ -4,6 +4,7 @@ import { escapeHtml } from "./utils.js";
 let benchRuntimes = [];
 let benchJobId = null;
 let benchPollTimer = null;
+let streamSource = null;
 
 async function detectRuntimes() {
   const btn = document.getElementById("detect-runtimes-btn");
@@ -45,11 +46,13 @@ function onRuntimeChange() {
   const runtimeName = document.getElementById("bench-runtime-select").value;
   const modelSelect = document.getElementById("bench-model-select");
   const startBtn = document.getElementById("bench-start-btn");
+  const streamBtn = document.getElementById("bench-stream-btn");
 
   if (!runtimeName) {
     modelSelect.innerHTML = '<option value="">Select runtime first…</option>';
     modelSelect.disabled = true;
     startBtn.disabled = true;
+    streamBtn.disabled = true;
     return;
   }
 
@@ -58,6 +61,7 @@ function onRuntimeChange() {
     modelSelect.innerHTML = '<option value="">No models loaded</option>';
     modelSelect.disabled = true;
     startBtn.disabled = true;
+    streamBtn.disabled = true;
     return;
   }
 
@@ -70,6 +74,7 @@ function onRuntimeChange() {
   });
   modelSelect.disabled = false;
   startBtn.disabled = false;
+  streamBtn.disabled = false;
 }
 
 async function startBenchmark() {
@@ -89,13 +94,18 @@ async function startBenchmark() {
   resultsDiv.innerHTML = "";
   statusDiv.innerHTML = '<p class="loading">Starting benchmark…</p>';
 
+  const body = {
+    runtime_name: runtimeName,
+    model_id: modelId,
+    prompt_type: promptType,
+    num_runs: numRuns,
+  };
+  if (promptType === "custom") {
+    body.custom_prompt = document.getElementById("bench-custom-prompt-text").value;
+  }
+
   try {
-    const data = await api.post("/benchmark/start", {
-      runtime_name: runtimeName,
-      model_id: modelId,
-      prompt_type: promptType,
-      num_runs: numRuns,
-    });
+    const data = await api.post("/benchmark/start", body);
 
     benchJobId = data.job_id;
     pollBenchmarkStatus();
@@ -206,8 +216,112 @@ function renderBenchmarkStatus(data) {
   resultsDiv.innerHTML = html;
 }
 
+function onPromptTypeChange() {
+  const promptType = document.getElementById("bench-prompt-select").value;
+  const customDiv = document.getElementById("bench-custom-prompt");
+  customDiv.style.display = promptType === "custom" ? "block" : "none";
+}
+
+function startStream() {
+  const runtimeName = document.getElementById("bench-runtime-select").value;
+  const modelId = document.getElementById("bench-model-select").value;
+  const promptType = document.getElementById("bench-prompt-select").value;
+
+  if (!runtimeName || !modelId) return;
+
+  const streamBtn = document.getElementById("bench-stream-btn");
+  const startBtn = document.getElementById("bench-start-btn");
+  const statusDiv = document.getElementById("bench-status");
+  const streamOutput = document.getElementById("bench-stream-output");
+  const streamText = document.getElementById("bench-stream-text");
+
+  // Reset stream display
+  streamText.textContent = "";
+  document.getElementById("stream-token-count").textContent = "0";
+  document.getElementById("stream-tok-sec").textContent = "—";
+  document.getElementById("stream-ttft").textContent = "—";
+  document.getElementById("stream-elapsed").textContent = "—";
+  streamOutput.style.display = "block";
+  document.getElementById("bench-results").innerHTML = "";
+
+  streamBtn.disabled = true;
+  startBtn.disabled = true;
+  streamBtn.textContent = "Streaming…";
+  statusDiv.innerHTML = '<p class="loading">Streaming tokens…</p>';
+
+  // Build SSE URL
+  const params = new URLSearchParams({
+    runtime_name: runtimeName,
+    model_id: modelId,
+    prompt_type: promptType,
+  });
+  if (promptType === "custom") {
+    params.set("custom_prompt", document.getElementById("bench-custom-prompt-text").value);
+  }
+
+  // Close any previous connection
+  if (streamSource) {
+    streamSource.close();
+    streamSource = null;
+  }
+
+  const es = new EventSource(`/api/benchmark/stream?${params}`);
+  streamSource = es;
+
+  es.addEventListener("token", (e) => {
+    const data = JSON.parse(e.data);
+    streamText.textContent += data.text;
+    document.getElementById("stream-token-count").textContent = data.token_count;
+    // Auto-scroll
+    streamText.scrollTop = streamText.scrollHeight;
+  });
+
+  es.addEventListener("metrics", (e) => {
+    const data = JSON.parse(e.data);
+    document.getElementById("stream-tok-sec").textContent = data.tok_per_sec;
+    document.getElementById("stream-ttft").textContent = `${data.ttft_ms} ms`;
+    document.getElementById("stream-elapsed").textContent = `${(data.elapsed_ms / 1000).toFixed(1)}s`;
+  });
+
+  es.addEventListener("done", (e) => {
+    const data = JSON.parse(e.data);
+    document.getElementById("stream-tok-sec").textContent = data.tok_per_sec;
+    document.getElementById("stream-ttft").textContent = `${data.ttft_ms} ms`;
+    document.getElementById("stream-elapsed").textContent = `${(data.elapsed_ms / 1000).toFixed(1)}s`;
+    document.getElementById("stream-token-count").textContent = data.tokens;
+    statusDiv.innerHTML = '<p style="color:var(--accent)">Stream complete.</p>';
+    cleanupStream();
+  });
+
+  es.addEventListener("error", (e) => {
+    let msg = "Stream connection lost";
+    try {
+      const data = JSON.parse(e.data);
+      msg = data.message || msg;
+    } catch {
+      // not a JSON error event — connection error
+    }
+    statusDiv.innerHTML = `<p class="error-message">${escapeHtml(msg)}</p>`;
+    cleanupStream();
+  });
+}
+
+function cleanupStream() {
+  if (streamSource) {
+    streamSource.close();
+    streamSource = null;
+  }
+  const streamBtn = document.getElementById("bench-stream-btn");
+  const startBtn = document.getElementById("bench-start-btn");
+  streamBtn.disabled = false;
+  startBtn.disabled = false;
+  streamBtn.textContent = "Stream";
+}
+
 export function initBenchmark() {
   document.getElementById("detect-runtimes-btn").addEventListener("click", detectRuntimes);
   document.getElementById("bench-runtime-select").addEventListener("change", onRuntimeChange);
   document.getElementById("bench-start-btn").addEventListener("click", startBenchmark);
+  document.getElementById("bench-stream-btn").addEventListener("click", startStream);
+  document.getElementById("bench-prompt-select").addEventListener("change", onPromptTypeChange);
 }
