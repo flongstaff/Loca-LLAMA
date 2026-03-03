@@ -54,6 +54,21 @@ MODELS: list[LLMModel] = [
     LLMModel("Qwen 2.5 Coder 7B", "Qwen", 7.62, 4096, 131072, 28, 4, 128, "Apache 2.0"),
     LLMModel("Qwen 2.5 Coder 14B", "Qwen", 14.77, 4096, 131072, 48, 4, 128, "Apache 2.0"),
     LLMModel("Qwen 2.5 Coder 32B", "Qwen", 32.76, 4096, 131072, 64, 8, 128, "Apache 2.0"),
+    # Qwen 3 (April 2025) — dense transformer models
+    LLMModel("Qwen 3 0.6B", "Qwen", 0.6, 4096, 40960, 28, 8, 128, "Apache 2.0"),
+    LLMModel("Qwen 3 1.7B", "Qwen", 1.7, 4096, 40960, 28, 8, 128, "Apache 2.0"),
+    LLMModel("Qwen 3 4B", "Qwen", 4.0, 4096, 40960, 36, 8, 128, "Apache 2.0"),
+    LLMModel("Qwen 3 8B", "Qwen", 8.0, 4096, 40960, 36, 8, 128, "Apache 2.0"),
+    LLMModel("Qwen 3 14B", "Qwen", 14.0, 4096, 40960, 40, 8, 128, "Apache 2.0"),
+    LLMModel("Qwen 3 32B", "Qwen", 32.0, 4096, 40960, 64, 8, 128, "Apache 2.0"),
+    # Qwen 3 MoE (total params listed, active params much lower)
+    LLMModel("Qwen 3 30B-A3B", "Qwen", 30.0, 4096, 40960, 48, 4, 128, "Apache 2.0"),
+    LLMModel("Qwen 3 235B-A22B", "Qwen", 235.0, 4096, 40960, 94, 4, 128, "Apache 2.0"),
+    # Qwen 3.5 (2025) — multimodal with mixed linear/full attention
+    LLMModel("Qwen 3.5 9B", "Qwen", 9.0, 4096, 262144, 32, 4, 256, "Apache 2.0"),
+    LLMModel("Qwen 3.5 27B", "Qwen", 27.0, 4096, 262144, 64, 4, 256, "Apache 2.0"),
+    LLMModel("Qwen 3.5 35B-A3B", "Qwen", 35.0, 4096, 262144, 40, 2, 256, "Apache 2.0"),
+    LLMModel("Qwen 3.5 122B-A10B", "Qwen", 122.0, 4096, 262144, 48, 2, 256, "Apache 2.0"),
     # DeepSeek
     LLMModel("DeepSeek-R1-Distill-Qwen-1.5B", "DeepSeek", 1.78, 4096, 131072, 28, 2, 128, "MIT"),
     LLMModel("DeepSeek-R1-Distill-Qwen-7B", "DeepSeek", 7.62, 4096, 131072, 28, 4, 128, "MIT"),
