@@ -1,6 +1,6 @@
 """Tests for templates.py command generation."""
 
-from loca_llama.templates import get_llama_cpp_command, get_template, TEMPLATES
+from loca_llama.templates import get_llama_cpp_command, TEMPLATES
 
 
 def test_llama_cpp_command_uses_jinja_not_interactive():

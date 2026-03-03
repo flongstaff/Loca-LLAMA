@@ -91,7 +91,7 @@ TEMPLATES: list[ModelTemplate] = [
             "You answer questions accurately and concisely."
         ),
         chat_template="llama3",
-        llama_cpp_flags=["--flash-attn"],
+        llama_cpp_flags=[],
         notes="Excellent all-rounder at 8B. Strong instruction following. Use flash attention for long context.",
         bench_tok_s_q4=50.0, bench_tok_s_q8=30.0, bench_prefill_q4=450.0,
     ),
@@ -106,7 +106,7 @@ TEMPLATES: list[ModelTemplate] = [
             "You provide detailed, well-reasoned answers."
         ),
         chat_template="llama3",
-        llama_cpp_flags=["--flash-attn"],
+        llama_cpp_flags=[],
         notes="Top-tier open model. On 48GB: Q4_K_M barely fits, limit context to 4-8K. Very slow generation.",
         bench_tok_s_q4=6.0, bench_tok_s_q8=None, bench_prefill_q4=40.0,
     ),
@@ -121,7 +121,7 @@ TEMPLATES: list[ModelTemplate] = [
             "You provide detailed, well-reasoned answers."
         ),
         chat_template="llama3",
-        llama_cpp_flags=["--flash-attn"],
+        llama_cpp_flags=[],
         notes="Latest Llama 70B. Improved over 3.1. Same memory constraints on 48GB.",
         bench_tok_s_q4=6.0, bench_tok_s_q8=None, bench_prefill_q4=40.0,
     ),
@@ -169,7 +169,7 @@ TEMPLATES: list[ModelTemplate] = [
         temperature=0.7, top_p=0.8, top_k=20, repeat_penalty=1.05, min_p=0.05,
         system_prompt="You are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
         chat_template="chatml",
-        llama_cpp_flags=["--flash-attn"],
+        llama_cpp_flags=[],
         notes="Near GPT-4 quality. On 48GB: Q3_K_L fits but slow (~8 tok/s). Worth it for quality.",
         bench_tok_s_q4=None, bench_tok_s_q8=None, bench_prefill_q4=None,
     ),
