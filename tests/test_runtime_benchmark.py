@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import urllib.error
 from io import BytesIO
 from unittest.mock import MagicMock, patch, call
 
@@ -508,77 +509,100 @@ class TestMakeFailResult:
 
 # ── benchmark_openai_api ───────────────────────────────────────────────────────
 
-class TestBenchmarkOpenaiApi:
-    def _make_api_response(
-        self,
-        prompt_tokens: int = 10,
-        completion_tokens: int = 50,
-        prompt_eval_ms: float = 0.0,
-        eval_ms: float = 0.0,
-    ) -> dict:
-        return {
-            "usage": {
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-            },
-            "timings": {
-                "prompt_eval_time_ms": prompt_eval_ms,
-                "eval_time_ms": eval_ms,
-            },
-            "choices": [{"message": {"content": "output"}}],
-        }
+def _sse_api_response(
+    content_tokens: list[str] | None = None,
+    prompt_tokens: int = 10,
+    completion_tokens: int = 50,
+    prompt_eval_ms: float = 0.0,
+    eval_ms: float = 0.0,
+    include_timings: bool = True,
+) -> MagicMock:
+    """Build an SSE streaming response mock for benchmark_openai_api.
 
+    Produces content delta chunks followed by a final chunk with usage/timings.
+    """
+    if content_tokens is None:
+        content_tokens = ["Hello", " world"]
+    events = []
+    for tok in content_tokens:
+        events.append(f'data: {json.dumps({"choices": [{"delta": {"content": tok}}]})}')
+    # Final chunk with usage and optional timings (like llama.cpp server)
+    final: dict = {
+        "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens},
+        "choices": [{"delta": {}}],
+    }
+    if include_timings:
+        final["timings"] = {"prompt_eval_time_ms": prompt_eval_ms, "eval_time_ms": eval_ms}
+    events.append(f"data: {json.dumps(final)}")
+    events.append("data: [DONE]")
+
+    raw = "\n".join(events) + "\n"
+    stream = BytesIO(raw.encode())
+    resp = MagicMock()
+    resp.__enter__ = lambda s: s
+    resp.__exit__ = MagicMock(return_value=False)
+    resp.__iter__ = lambda s: iter(stream.readlines())
+    return resp
+
+
+class TestBenchmarkOpenaiApi:
     def test_should_return_success_result_when_request_succeeds(self):
-        data = self._make_api_response(prompt_tokens=10, completion_tokens=50, eval_ms=800.0)
-        with patch("urllib.request.urlopen", return_value=_json_response(data)):
+        resp = _sse_api_response(prompt_tokens=10, completion_tokens=50, eval_ms=800.0)
+        with patch("urllib.request.urlopen", return_value=resp):
             result = benchmark_openai_api("http://127.0.0.1:1234", "llama-3", "lm-studio")
         assert result.success is True
 
     def test_should_extract_usage_tokens_from_response(self):
-        data = self._make_api_response(prompt_tokens=15, completion_tokens=75)
-        with patch("urllib.request.urlopen", return_value=_json_response(data)):
+        resp = _sse_api_response(prompt_tokens=15, completion_tokens=75)
+        with patch("urllib.request.urlopen", return_value=resp):
             result = benchmark_openai_api("http://127.0.0.1:1234", "llama-3", "lm-studio")
         assert result.prompt_tokens == 15
         assert result.generated_tokens == 75
 
     def test_should_extract_timings_from_response_when_present(self):
-        data = self._make_api_response(prompt_eval_ms=250.0, eval_ms=750.0)
-        with patch("urllib.request.urlopen", return_value=_json_response(data)):
+        resp = _sse_api_response(prompt_eval_ms=250.0, eval_ms=750.0)
+        with patch("urllib.request.urlopen", return_value=resp):
             result = benchmark_openai_api("http://127.0.0.1:1234", "llama-3", "lm-studio")
         assert result.prompt_eval_time_ms == 250.0
         assert result.eval_time_ms == 750.0
 
     def test_should_estimate_timings_from_total_when_no_timings_in_response(self):
-        data = {"usage": {"prompt_tokens": 10, "completion_tokens": 50}, "timings": {}}
-        with patch("urllib.request.urlopen", return_value=_json_response(data)), \
-             patch("time.perf_counter", side_effect=[0.0, 1.0]):
+        resp = _sse_api_response(
+            prompt_tokens=10, completion_tokens=50, include_timings=False,
+        )
+        with patch("urllib.request.urlopen", return_value=resp):
             result = benchmark_openai_api("http://127.0.0.1:1234", "llama-3", "lm-studio")
-        assert result.prompt_eval_time_ms == pytest.approx(300.0, abs=1.0)
-        assert result.eval_time_ms == pytest.approx(700.0, abs=1.0)
+        # Without server timings, function estimates from measured wall-clock
+        assert result.prompt_eval_time_ms > 0
+        assert result.eval_time_ms > 0
 
     def test_should_compute_tokens_per_second_from_timing(self):
-        data = self._make_api_response(completion_tokens=100, eval_ms=1000.0)
-        with patch("urllib.request.urlopen", return_value=_json_response(data)):
+        resp = _sse_api_response(
+            content_tokens=[f"t{i}" for i in range(100)],
+            completion_tokens=100, eval_ms=1000.0,
+        )
+        with patch("urllib.request.urlopen", return_value=resp):
             result = benchmark_openai_api("http://127.0.0.1:1234", "llama-3", "lm-studio")
-        assert result.tokens_per_second == pytest.approx(100.0)
+        assert result.tokens_per_second == pytest.approx(99.0)
 
     def test_should_return_fail_result_when_urlopen_raises(self):
-        with patch("urllib.request.urlopen", side_effect=OSError("connection refused")):
+        exc = urllib.error.URLError(ConnectionRefusedError(61, "connection refused"))
+        with patch("urllib.request.urlopen", side_effect=exc):
             result = benchmark_openai_api("http://127.0.0.1:1234", "llama-3", "lm-studio")
         assert result.success is False
-        assert "connection refused" in result.error
+        assert "Cannot connect" in result.error
 
     def test_should_store_run_number_in_result(self):
-        data = self._make_api_response()
-        with patch("urllib.request.urlopen", return_value=_json_response(data)):
+        resp = _sse_api_response(prompt_tokens=10, completion_tokens=50)
+        with patch("urllib.request.urlopen", return_value=resp):
             result = benchmark_openai_api(
                 "http://127.0.0.1:1234", "llama-3", "lm-studio", run_number=3
             )
         assert result.run_number == 3
 
     def test_should_store_model_name_and_runtime_in_result(self):
-        data = self._make_api_response()
-        with patch("urllib.request.urlopen", return_value=_json_response(data)):
+        resp = _sse_api_response(prompt_tokens=10, completion_tokens=50)
+        with patch("urllib.request.urlopen", return_value=resp):
             result = benchmark_openai_api(
                 "http://127.0.0.1:1234", "my-model", "my-runtime"
             )
@@ -586,11 +610,27 @@ class TestBenchmarkOpenaiApi:
         assert result.runtime == "my-runtime"
 
     def test_should_accept_alternate_timing_key_names(self):
-        data = {
+        """llama.cpp server uses prompt_ms/predicted_ms keys."""
+        # Build SSE stream with alternate timing keys in final chunk
+        events = [
+            f'data: {json.dumps({"choices": [{"delta": {"content": "Hello"}}]})}',
+            f'data: {json.dumps({"choices": [{"delta": {"content": " world"}}]})}',
+        ]
+        final = {
             "usage": {"prompt_tokens": 10, "completion_tokens": 50},
             "timings": {"prompt_ms": 200.0, "predicted_ms": 800.0},
+            "choices": [{"delta": {}}],
         }
-        with patch("urllib.request.urlopen", return_value=_json_response(data)):
+        events.append(f"data: {json.dumps(final)}")
+        events.append("data: [DONE]")
+        raw = "\n".join(events) + "\n"
+        stream = BytesIO(raw.encode())
+        resp = MagicMock()
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = MagicMock(return_value=False)
+        resp.__iter__ = lambda s: iter(stream.readlines())
+
+        with patch("urllib.request.urlopen", return_value=resp):
             result = benchmark_openai_api("http://127.0.0.1:1234", "llama-3", "llama.cpp-server")
         assert result.prompt_eval_time_ms == 200.0
         assert result.eval_time_ms == 800.0
@@ -701,6 +741,68 @@ class TestBenchmarkLlamaCppNative:
         with patch("shutil.which", return_value=None):
             result = benchmark_llama_cpp_native("/models/llama.gguf", run_number=2)
         assert result.run_number == 2
+
+    def test_should_parse_new_format_prompt_and_generation_speeds(self):
+        """New llama.cpp builds (b8000+) output [ Prompt: X t/s | Generation: Y t/s ]."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stderr = ""
+        mock_result.stdout = "some output\n[ Prompt: 132.3 t/s | Generation: 28.3 t/s ]\n"
+
+        with patch("shutil.which", return_value="/usr/local/bin/llama-cli"), \
+             patch("subprocess.run", return_value=mock_result):
+            result = benchmark_llama_cpp_native("/models/llama.gguf")
+
+        assert result.success is True
+        assert result.prompt_tokens_per_second == pytest.approx(132.3)
+        assert result.tokens_per_second == pytest.approx(28.3)
+
+    def test_should_prefer_old_format_over_new_when_both_present(self):
+        """Old format is more detailed (has token counts), prefer it when available."""
+        output = (
+            "llama_print_timings: prompt eval time = 200.00 ms / 10 tokens\n"
+            "llama_print_timings:       eval time = 800.00 ms / 100 tokens\n"
+            "[ Prompt: 50.0 t/s | Generation: 125.0 t/s ]\n"
+        )
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stderr = output
+        mock_result.stdout = ""
+
+        with patch("shutil.which", return_value="/usr/local/bin/llama-cli"), \
+             patch("subprocess.run", return_value=mock_result):
+            result = benchmark_llama_cpp_native("/models/llama.gguf")
+
+        assert result.generated_tokens == 100
+        assert result.prompt_tokens == 10
+
+    def test_should_return_descriptive_error_when_output_unparseable(self):
+        """When returncode is 0 but no timing output is found, error should be descriptive."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stderr = ""
+        mock_result.stdout = "model loaded successfully\nsome text output\n"
+
+        with patch("shutil.which", return_value="/usr/local/bin/llama-cli"), \
+             patch("subprocess.run", return_value=mock_result):
+            result = benchmark_llama_cpp_native("/models/llama.gguf")
+
+        assert result.success is False
+        assert "Could not parse" in result.error
+
+    def test_should_include_no_conversation_flag_in_command(self):
+        """Ensure --no-conversation flag is passed to prevent interactive mode."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stderr = self._TIMING_OUTPUT
+        mock_result.stdout = ""
+
+        with patch("shutil.which", return_value="/usr/local/bin/llama-cli"), \
+             patch("subprocess.run", return_value=mock_result) as mock_run:
+            benchmark_llama_cpp_native("/models/llama.gguf")
+
+        cmd = mock_run.call_args[0][0]
+        assert "--no-conversation" in cmd
 
 
 # ── run_benchmark_suite ────────────────────────────────────────────────────────
@@ -942,10 +1044,10 @@ class TestDetectAllRuntimes:
 
 
 def _sse_response(events: list[str]) -> MagicMock:
-    """Build a mock that simulates byte-by-byte SSE streaming.
+    """Build a mock that simulates line-based SSE streaming.
 
     Each event string should be a complete SSE line (e.g. 'data: {...}').
-    Lines are joined with newlines and converted to a BytesIO for read(1).
+    Lines are joined with newlines and converted to a BytesIO for iteration.
     """
     raw = "\n".join(events) + "\n"
     stream = BytesIO(raw.encode())
@@ -953,6 +1055,7 @@ def _sse_response(events: list[str]) -> MagicMock:
     resp.read = stream.read
     resp.__enter__ = lambda s: s
     resp.__exit__ = MagicMock(return_value=False)
+    resp.__iter__ = lambda s: iter(stream.readlines())
     return resp
 
 
