@@ -3,8 +3,10 @@
 import json
 import re
 import shutil
+import socket
 import subprocess
 import time
+import urllib.error
 import urllib.request
 from collections.abc import Generator
 from dataclasses import dataclass, field
@@ -134,6 +136,26 @@ def _make_fail_result(model_name: str, runtime: str, ctx: int, error: str, run: 
     )
 
 
+def format_benchmark_error(exc: Exception, runtime_name: str, url: str) -> str:
+    """Convert raw exceptions to user-friendly benchmark error messages."""
+    if isinstance(exc, urllib.error.HTTPError):
+        if exc.code >= 500:
+            return f"{runtime_name} internal error ({exc.code}). Try restarting the server."
+        return f"{runtime_name} rejected the request: {exc.code} {exc.reason}"
+    if isinstance(exc, urllib.error.URLError):
+        reason = exc.reason
+        if isinstance(reason, (ConnectionRefusedError, OSError)):
+            return f"Cannot connect to {runtime_name} at {url}. Is the server running?"
+        return f"Network error connecting to {runtime_name}: {reason}"
+    if isinstance(exc, (socket.timeout, TimeoutError)):
+        return f"Request to {runtime_name} timed out. The model may be too large or the server overloaded."
+    if isinstance(exc, json.JSONDecodeError):
+        return f"Invalid response from {runtime_name}. The server may be misconfigured."
+    if isinstance(exc, ConnectionRefusedError):
+        return f"Cannot connect to {runtime_name} at {url}. Is the server running?"
+    return f"Benchmark error: {type(exc).__name__}"
+
+
 def benchmark_openai_api(
     base_url: str,
     model_id: str,
@@ -143,42 +165,97 @@ def benchmark_openai_api(
     context_length: int = 4096,
     run_number: int = 1,
 ) -> BenchmarkResult:
-    """Run benchmark against an OpenAI-compatible API (LM Studio or llama.cpp)."""
+    """Run benchmark against an OpenAI-compatible API (LM Studio or llama.cpp).
+
+    Uses streaming to measure real TTFT (time to first token) and generation
+    speed.  Falls back to server-provided timings when available (llama.cpp).
+    """
     url = f"{base_url}/v1/chat/completions"
     payload = json.dumps({
         "model": model_id,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": max_tokens,
         "temperature": 0.7,
-        "stream": False,
+        "stream": True,
     }).encode()
 
-    headers = {"Content-Type": "application/json"}
+    headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
 
     start = time.perf_counter()
+    token_count = 0
+    ttft_ms = 0.0
+    first_token_time = 0.0
+    last_token_time = 0.0
+    prompt_tokens = 0
+    completion_tokens = 0
+    timings: dict = {}
+
     try:
         req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
         with urllib.request.urlopen(req, timeout=120) as resp:
-            data = json.loads(resp.read().decode())
+            for raw_line in resp:
+                text = raw_line.decode("utf-8", errors="replace").strip()
+                if not text or text.startswith(":"):
+                    continue
+                if not text.startswith("data: "):
+                    continue
+                data_str = text[6:]
+                if data_str == "[DONE]":
+                    break
+                try:
+                    obj = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                # Server timings / usage in final chunk (llama.cpp)
+                if "timings" in obj:
+                    timings = obj["timings"]
+                if "usage" in obj:
+                    u = obj["usage"]
+                    prompt_tokens = u.get("prompt_tokens", prompt_tokens)
+                    completion_tokens = u.get("completion_tokens", completion_tokens)
+                # Content delta → token
+                choices = obj.get("choices", [])
+                if choices:
+                    delta = choices[0].get("delta", {})
+                    content = delta.get("content")
+                    if content:
+                        elapsed = (time.perf_counter() - start) * 1000
+                        token_count += 1
+                        if token_count == 1:
+                            ttft_ms = elapsed
+                            first_token_time = elapsed
+                        last_token_time = elapsed
     except Exception as e:
-        return _make_fail_result(model_id, runtime_name, context_length, str(e), run_number)
+        error_msg = format_benchmark_error(e, runtime_name, base_url)
+        return _make_fail_result(model_id, runtime_name, context_length, error_msg, run_number)
 
     total_ms = (time.perf_counter() - start) * 1000
-    usage = data.get("usage", {})
-    prompt_tokens = usage.get("prompt_tokens", 0)
-    completion_tokens = usage.get("completion_tokens", 0)
+    if not completion_tokens:
+        completion_tokens = token_count
 
-    # llama.cpp provides precise timings
-    timings = data.get("timings", {})
+    # Estimate prompt tokens if server didn't report them (LM Studio streaming)
+    if not prompt_tokens:
+        prompt_tokens = max(len(prompt) // 4, 1)
+
+    # Prefer server-provided timings (llama.cpp gives precise values)
     prompt_eval_ms = timings.get("prompt_eval_time_ms") or timings.get("prompt_ms", 0)
     eval_ms = timings.get("eval_time_ms") or timings.get("predicted_ms", 0)
 
-    if not prompt_eval_ms and not eval_ms:
-        prompt_eval_ms = total_ms * 0.3
-        eval_ms = total_ms * 0.7
+    if not prompt_eval_ms:
+        # Use measured TTFT as prompt eval time
+        prompt_eval_ms = ttft_ms if ttft_ms > 0 else total_ms * 0.3
 
-    tok_per_sec = (completion_tokens / eval_ms * 1000) if eval_ms > 0 else 0
-    prompt_tok_per_sec = (prompt_tokens / prompt_eval_ms * 1000) if prompt_eval_ms > 0 else 0
+    if not eval_ms:
+        # Generation time = time between first and last token
+        if token_count > 1 and last_token_time > first_token_time:
+            eval_ms = last_token_time - first_token_time
+        else:
+            eval_ms = total_ms - prompt_eval_ms if prompt_eval_ms < total_ms else total_ms * 0.7
+
+    # Tokens counted from stream deltas; gen speed uses (tokens - 1) for inter-token interval
+    gen_tokens_for_speed = max(completion_tokens - 1, 1) if token_count > 1 else completion_tokens
+    tok_per_sec = (gen_tokens_for_speed / eval_ms * 1000) if eval_ms > 0 else 0
+    prompt_tok_per_sec = (prompt_tokens / prompt_eval_ms * 1000) if prompt_eval_ms > 0 and prompt_tokens > 0 else 0
 
     return BenchmarkResult(
         model_name=model_id,
@@ -225,31 +302,23 @@ def benchmark_openai_api_streaming(
     start = time.perf_counter()
 
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        buf = b""
-        while True:
-            chunk = resp.read(1)
-            if not chunk:
-                break
-            buf += chunk
-            # Process complete lines
-            while b"\n" in buf:
-                line, buf = buf.split(b"\n", 1)
-                text = line.decode("utf-8", errors="replace").strip()
-                if not text or text.startswith(":"):
+        for raw_line in resp:
+            text = raw_line.decode("utf-8", errors="replace").strip()
+            if not text or text.startswith(":"):
+                continue
+            if text.startswith("data: "):
+                data_str = text[6:]
+                if data_str == "[DONE]":
+                    return
+                try:
+                    obj = json.loads(data_str)
+                    delta = obj["choices"][0].get("delta", {})
+                    content = delta.get("content")
+                    if content:
+                        elapsed = (time.perf_counter() - start) * 1000
+                        yield (content, elapsed)
+                except (json.JSONDecodeError, KeyError, IndexError):
                     continue
-                if text.startswith("data: "):
-                    data_str = text[6:]
-                    if data_str == "[DONE]":
-                        return
-                    try:
-                        obj = json.loads(data_str)
-                        delta = obj["choices"][0].get("delta", {})
-                        content = delta.get("content")
-                        if content:
-                            elapsed = (time.perf_counter() - start) * 1000
-                            yield (content, elapsed)
-                    except (json.JSONDecodeError, KeyError, IndexError):
-                        continue
 
 
 def benchmark_llama_cpp_native(
@@ -271,7 +340,7 @@ def benchmark_llama_cpp_native(
     cmd = [
         exe, "-m", model_path, "-p", prompt,
         "-n", str(max_tokens), "-c", str(context_length),
-        "-ngl", str(n_gpu_layers), "--log-disable",
+        "-ngl", str(n_gpu_layers), "-fa", "on", "--log-disable",
     ]
 
     start = time.perf_counter()
@@ -379,6 +448,93 @@ def run_benchmark_sweep(
         })
 
     return combo_results
+
+
+def benchmark_with_server(
+    model_path: str,
+    prompt_type: str = "default",
+    max_tokens: int = BENCH_MAX_TOKENS,
+    context_length: int = 4096,
+    n_gpu_layers: int = -1,
+    num_runs: int = 3,
+    port: int = 8099,
+    progress_callback: object = None,
+    custom_prompt: str | None = None,
+) -> list[BenchmarkResult]:
+    """Start a temporary llama-server, benchmark against it, then stop and unload.
+
+    Ensures the model is loaded before benchmarking and fully unloaded
+    (process terminated, memory freed) when done or on error.
+    """
+    model_name = Path(model_path).stem
+
+    exe = shutil.which("llama-server") or shutil.which("server")
+    if not exe:
+        return [_make_fail_result(
+            model_name, "llama.cpp-server", context_length,
+            "llama-server not found in PATH", i,
+        ) for i in range(1, num_runs + 1)]
+
+    cmd = [
+        exe, "-m", model_path,
+        "--port", str(port),
+        "-c", str(context_length),
+        "-ngl", str(n_gpu_layers),
+        "-fa", "on",
+    ]
+
+    proc: subprocess.Popen | None = None
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        # Wait for server to become healthy
+        base_url = f"http://127.0.0.1:{port}"
+        healthy = False
+        for _ in range(60):
+            time.sleep(1)
+            if proc.poll() is not None:
+                break
+            try:
+                with urllib.request.urlopen(f"{base_url}/health", timeout=2) as resp:
+                    data = json.loads(resp.read().decode())
+                    if data.get("status") == "ok":
+                        healthy = True
+                        break
+            except Exception:
+                continue
+
+        if not healthy:
+            return [_make_fail_result(
+                model_name, "llama.cpp-server", context_length,
+                "Server failed to start or load model within 60s", i,
+            ) for i in range(1, num_runs + 1)]
+
+        # Discover model ID from the running server
+        try:
+            with urllib.request.urlopen(f"{base_url}/v1/models", timeout=5) as resp:
+                mdata = json.loads(resp.read().decode())
+                models = [m["id"] for m in mdata.get("data", [])]
+                model_id = models[0] if models else model_name
+        except Exception:
+            model_id = model_name
+
+        runtime = RuntimeInfo(name="llama.cpp-server", url=base_url, models=[model_id])
+
+        results = run_benchmark_suite(
+            runtime, model_id, prompt_type, num_runs, max_tokens,
+            context_length, progress_callback, custom_prompt,
+        )
+        return results
+
+    finally:
+        # Always terminate the server to unload the model and free memory
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
 
 
 def aggregate_results(results: list[BenchmarkResult], skip_first: bool = True) -> dict:
