@@ -139,6 +139,13 @@ def _make_fail_result(model_name: str, runtime: str, ctx: int, error: str, run: 
 def format_benchmark_error(exc: Exception, runtime_name: str, url: str) -> str:
     """Convert raw exceptions to user-friendly benchmark error messages."""
     if isinstance(exc, urllib.error.HTTPError):
+        # Try to read error body for "Channel Error" (MLX model crash in LM Studio)
+        try:
+            body = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+        if "channel" in body.lower() or "channel" in str(exc.reason).lower():
+            return f"Model crashed in {runtime_name} (Channel Error). The model may be unstable — try a smaller quantization or different model."
         if exc.code >= 500:
             return f"{runtime_name} internal error ({exc.code}). Try restarting the server."
         return f"{runtime_name} rejected the request: {exc.code} {exc.reason}"
@@ -146,14 +153,43 @@ def format_benchmark_error(exc: Exception, runtime_name: str, url: str) -> str:
         reason = exc.reason
         if isinstance(reason, (ConnectionRefusedError, OSError)):
             return f"Cannot connect to {runtime_name} at {url}. Is the server running?"
+        reason_str = str(reason)
+        if "connection reset" in reason_str.lower() or "broken pipe" in reason_str.lower():
+            return f"Model crashed in {runtime_name} (connection reset). The model may be unstable."
         return f"Network error connecting to {runtime_name}: {reason}"
     if isinstance(exc, (socket.timeout, TimeoutError)):
         return f"Request to {runtime_name} timed out. The model may be too large or the server overloaded."
     if isinstance(exc, json.JSONDecodeError):
         return f"Invalid response from {runtime_name}. The server may be misconfigured."
-    if isinstance(exc, ConnectionRefusedError):
+    if isinstance(exc, (ConnectionRefusedError, ConnectionResetError, BrokenPipeError)):
         return f"Cannot connect to {runtime_name} at {url}. Is the server running?"
-    return f"Benchmark error: {type(exc).__name__}"
+    # http.client.IncompleteRead — connection dropped mid-stream (model crashed)
+    exc_name = type(exc).__name__
+    if exc_name == "IncompleteRead" or "incomplete" in str(exc).lower():
+        return f"Model crashed in {runtime_name} mid-generation (connection dropped). The model may be unstable."
+    return f"Benchmark error: {exc_name}"
+
+
+def _is_model_crash(error: str | None) -> bool:
+    """Check if a benchmark error indicates a model crash (not transient)."""
+    if not error:
+        return False
+    crash_indicators = ["crashed", "channel error", "connection reset", "unstable", "segmentation"]
+    return any(ind in error.lower() for ind in crash_indicators)
+
+
+def _wait_for_server_ready(base_url: str, timeout: int = 30) -> bool:
+    """Wait for an OpenAI-compatible server to respond to /v1/models."""
+    for _ in range(timeout):
+        try:
+            with urllib.request.urlopen(f"{base_url}/v1/models", timeout=2) as resp:
+                data = json.loads(resp.read().decode())
+                if data.get("data"):
+                    return True
+        except Exception:
+            pass
+        time.sleep(1)
+    return False
 
 
 def benchmark_openai_api(
@@ -426,17 +462,46 @@ def run_benchmark_suite(
     progress_callback=None,
     custom_prompt: str | None = None,
 ) -> list[BenchmarkResult]:
-    """Run a multi-round benchmark. First run is warmup."""
+    """Run a multi-round benchmark. First run is warmup.
+
+    Aborts early if the model crashes repeatedly (e.g. MLX segfaults).
+    After a crash, waits for the server to recover before retrying.
+    """
     prompt = custom_prompt if custom_prompt else BENCH_PROMPTS.get(prompt_type, BENCH_PROMPTS["default"])
     results = []
+    consecutive_crashes = 0
+    max_consecutive_crashes = 2
 
     for i in range(1, num_runs + 1):
         if progress_callback:
             progress_callback(i, num_runs)
+
+        # After a crash, wait for the server to reload the model
+        if consecutive_crashes > 0:
+            if not _wait_for_server_ready(runtime.url, timeout=30):
+                results.append(_make_fail_result(
+                    model_id, runtime.name, context_length,
+                    "Server did not recover after model crash", i,
+                ))
+                break
+
         r = benchmark_openai_api(
             runtime.url, model_id, runtime.name, prompt, max_tokens, context_length, run_number=i,
         )
         results.append(r)
+
+        if not r.success and _is_model_crash(r.error):
+            consecutive_crashes += 1
+            if consecutive_crashes >= max_consecutive_crashes:
+                # Fill remaining runs with the same error so callers see full count
+                for j in range(i + 1, num_runs + 1):
+                    results.append(_make_fail_result(
+                        model_id, runtime.name, context_length,
+                        f"Skipped: model crashed {consecutive_crashes} times consecutively", j,
+                    ))
+                break
+        else:
+            consecutive_crashes = 0
 
     return results
 
