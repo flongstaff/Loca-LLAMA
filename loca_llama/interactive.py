@@ -652,64 +652,86 @@ def _benchmark_local_model(mac: MacSpec, m: LocalModel):
         f"{BOLD}Coding{RESET}     -- Write a BST implementation",
         f"{BOLD}Reasoning{RESET}  -- Logic puzzles",
         f"{BOLD}Creative{RESET}   -- Short story writing",
+        f"{BOLD}All{RESET}        -- Run all prompts in sequence",
     ]
-    pidx = prompt_choice("Benchmark prompt:", prompt_options)
-    if pidx is None:
-        return
-    prompt_type = ["default", "coding", "reasoning", "creative"][pidx]
 
-    num_runs_str = prompt_input("Number of runs (first is warmup)", "3")
-    try:
-        num_runs = max(1, int(num_runs_str))
-    except ValueError:
-        num_runs = 3
+    # Loop: keep benchmarking same model with different prompts
+    while True:
+        pidx = prompt_choice("Benchmark prompt:", prompt_options)
+        if pidx is None:
+            return
+        run_all = pidx == 4
+        prompt_types = ["default", "coding", "reasoning", "creative"] if run_all else [["default", "coding", "reasoning", "creative"][pidx]]
 
-    # Start memory monitoring
-    monitor = MemoryMonitor(interval=0.5)
-    monitor.start()
+        num_runs_str = prompt_input("Number of runs (first is warmup)", "3")
+        try:
+            num_runs = max(1, int(num_runs_str))
+        except ValueError:
+            num_runs = 3
 
-    all_results: dict[str, list[BenchmarkResult]] = {}
+        # Start memory monitoring
+        monitor = MemoryMonitor(interval=0.5)
+        monitor.start()
 
-    for rt in runtimes:
-        model_id = _match_model_on_runtime(m, rt)
-        if not model_id:
-            print(f"  {YELLOW}Skipping {rt.name}: model not found on this runtime.{RESET}")
+        all_results: dict[str, list[BenchmarkResult]] = {}
+
+        for prompt_type in prompt_types:
+            if run_all:
+                prompt_label = prompt_type if prompt_type != "default" else "general"
+                print(f"\n  {BOLD}--- {prompt_label.upper()} prompt ---{RESET}")
+
+            for rt in runtimes:
+                model_id = _match_model_on_runtime(m, rt)
+                if not model_id:
+                    print(f"  {YELLOW}Skipping {rt.name}: model not found on this runtime.{RESET}")
+                    continue
+
+                print(f"\n  {runtime_badge(rt.name)} Benchmarking {BOLD}{model_id}{RESET}...")
+                def progress(run: int, total: int) -> None:
+                    label = "warmup" if run == 1 and total > 1 else f"run {run}"
+                    current = monitor.get_current()
+                    mem_str = f" {format_mini_memory_bar(current)}" if current else ""
+                    print(f"    {DIM}[{label}/{total}]{RESET}{mem_str}", end=" ", flush=True)
+
+                results = run_benchmark_suite(rt, model_id, prompt_type, num_runs, progress_callback=progress)
+                print()
+                key = f"{rt.name} ({prompt_type})" if run_all else rt.name
+                all_results[key] = results
+
+            if m.format == "gguf":
+                print(f"\n  {runtime_badge('llama.cpp-cli')} Benchmarking {BOLD}{m.name}{RESET}...")
+                cli_results = []
+                for i in range(1, num_runs + 1):
+                    label = "warmup" if i == 1 and num_runs > 1 else f"run {i}"
+                    current = monitor.get_current()
+                    mem_str = f" {format_mini_memory_bar(current)}" if current else ""
+                    print(f"    {DIM}[{label}/{num_runs}]{RESET}{mem_str}", end=" ", flush=True)
+                    r = benchmark_llama_cpp_native(str(m.path), BENCH_PROMPTS[prompt_type], run_number=i)
+                    cli_results.append(r)
+                print()
+                key = f"llama.cpp-cli ({prompt_type})" if run_all else "llama.cpp-cli"
+                all_results[key] = cli_results
+
+        # Stop monitoring and get report
+        mem_report = monitor.stop()
+
+        if not all_results:
+            print(f"\n  {RED}No benchmarks could be run.{RESET}")
+            input(f"\n  {DIM}Press Enter to continue...{RESET}")
+            return
+
+        _display_benchmark_comparison(all_results, num_runs, mem_report)
+
+        # Offer to run another benchmark with the same model
+        after_options = [
+            f"{BOLD}Run another prompt{RESET}   -- Same model, different prompt",
+            f"{BOLD}Back{RESET}                  -- Return to previous screen",
+        ]
+        aidx = prompt_choice("What next?", after_options, allow_back=False)
+        if aidx == 0:
             continue
-
-        print(f"\n  {runtime_badge(rt.name)} Benchmarking {BOLD}{model_id}{RESET}...")
-        def progress(run, total):
-            label = "warmup" if run == 1 and total > 1 else f"run {run}"
-            current = monitor.get_current()
-            mem_str = f" {format_mini_memory_bar(current)}" if current else ""
-            print(f"    {DIM}[{label}/{total}]{RESET}{mem_str}", end=" ", flush=True)
-
-        results = run_benchmark_suite(rt, model_id, prompt_type, num_runs, progress_callback=progress)
-        print()
-        all_results[rt.name] = results
-
-    if m.format == "gguf":
-        print(f"\n  {runtime_badge('llama.cpp-cli')} Benchmarking {BOLD}{m.name}{RESET}...")
-        cli_results = []
-        for i in range(1, num_runs + 1):
-            label = "warmup" if i == 1 and num_runs > 1 else f"run {i}"
-            current = monitor.get_current()
-            mem_str = f" {format_mini_memory_bar(current)}" if current else ""
-            print(f"    {DIM}[{label}/{num_runs}]{RESET}{mem_str}", end=" ", flush=True)
-            r = benchmark_llama_cpp_native(str(m.path), BENCH_PROMPTS[prompt_type], run_number=i)
-            cli_results.append(r)
-        print()
-        all_results["llama.cpp-cli"] = cli_results
-
-    # Stop monitoring and get report
-    mem_report = monitor.stop()
-
-    if not all_results:
-        print(f"\n  {RED}No benchmarks could be run.{RESET}")
-        input(f"\n  {DIM}Press Enter to continue...{RESET}")
-        return
-
-    _display_benchmark_comparison(all_results, num_runs, mem_report)
-    input(f"\n  {DIM}Press Enter to continue...{RESET}")
+        else:
+            return
 
 
 def _match_model_on_runtime(local: LocalModel, runtime: RuntimeInfo) -> str | None:
@@ -726,9 +748,17 @@ def _match_model_on_runtime(local: LocalModel, runtime: RuntimeInfo) -> str | No
 
 
 def _display_benchmark_comparison(all_results: dict[str, list[BenchmarkResult]], num_runs: int, mem_report: MemoryReport | None = None):
-    print(f"\n  {BOLD}{'=' * 65}{RESET}")
-    print(f"  {BOLD}  BENCHMARK RESULTS — LM Studio vs llama.cpp{RESET}")
-    print(f"  {BOLD}{'=' * 65}{RESET}")
+    runtime_names = list(all_results.keys())
+    if len(runtime_names) >= 2:
+        title = f"BENCHMARK RESULTS — {' vs '.join(runtime_names)}"
+    elif runtime_names:
+        title = f"BENCHMARK RESULTS — {runtime_names[0]}"
+    else:
+        title = "BENCHMARK RESULTS"
+    width = max(65, len(title) + 4)
+    print(f"\n  {BOLD}{'=' * width}{RESET}")
+    print(f"  {BOLD}  {title}{RESET}")
+    print(f"  {BOLD}{'=' * width}{RESET}")
 
     # Memory report
     if mem_report and mem_report.samples:
@@ -1036,69 +1066,101 @@ def screen_benchmark(mac: MacSpec):
         f"{BOLD}Coding{RESET}     -- Write a BST implementation",
         f"{BOLD}Reasoning{RESET}  -- Logic puzzles",
         f"{BOLD}Creative{RESET}   -- Short story writing",
+        f"{BOLD}All{RESET}        -- Run all prompts in sequence",
     ]
-    pidx = prompt_choice("Benchmark prompt:", prompt_options)
-    if pidx is None:
-        return
-    prompt_type = ["default", "coding", "reasoning", "creative"][pidx]
 
-    num_runs_str = prompt_input("Number of runs (first is warmup)", "3")
-    try:
-        num_runs = max(1, int(num_runs_str))
-    except ValueError:
-        num_runs = 3
+    # Loop: keep benchmarking same model with different prompts
+    while True:
+        pidx = prompt_choice("Benchmark prompt:", prompt_options)
+        if pidx is None:
+            return
+        run_all = pidx == 4
+        prompt_types = ["default", "coding", "reasoning", "creative"] if run_all else [["default", "coding", "reasoning", "creative"][pidx]]
 
-    # Start memory monitoring
-    monitor = MemoryMonitor(interval=0.5)
-    monitor.start()
+        num_runs_str = prompt_input("Number of runs (first is warmup)", "3")
+        try:
+            num_runs = max(1, int(num_runs_str))
+        except ValueError:
+            num_runs = 3
 
-    all_results: dict[str, list[BenchmarkResult]] = {}
+        # Start memory monitoring
+        monitor = MemoryMonitor(interval=0.5)
+        monitor.start()
 
-    if selected_rt is None:
-        print(f"\n  {runtime_badge('llama.cpp-cli')} Benchmarking...")
-        cli_results = []
-        for i in range(1, num_runs + 1):
-            label = "warmup" if i == 1 and num_runs > 1 else f"run {i}"
-            current = monitor.get_current()
-            mem_str = f" {format_mini_memory_bar(current)}" if current else ""
-            print(f"    {DIM}[{label}/{num_runs}]{RESET}{mem_str}", end=" ", flush=True)
-            r = benchmark_llama_cpp_native(selected_model, BENCH_PROMPTS[prompt_type], run_number=i)
-            cli_results.append(r)
-        print()
-        all_results["llama.cpp-cli"] = cli_results
-    else:
-        print(f"\n  {runtime_badge(selected_rt.name)} Benchmarking {BOLD}{selected_model}{RESET}...")
-        def progress(run, total):
-            label = "warmup" if run == 1 and total > 1 else f"run {run}"
-            current = monitor.get_current()
-            mem_str = f" {format_mini_memory_bar(current)}" if current else ""
-            print(f"    {DIM}[{label}/{total}]{RESET}{mem_str}", end=" ", flush=True)
+        all_results: dict[str, list[BenchmarkResult]] = {}
 
-        results = run_benchmark_suite(selected_rt, selected_model, prompt_type, num_runs, progress_callback=progress)
-        print()
-        all_results[selected_rt.name] = results
+        for prompt_type in prompt_types:
+            if run_all:
+                prompt_label = prompt_type if prompt_type != "default" else "general"
+                print(f"\n  {BOLD}--- {prompt_label.upper()} prompt ---{RESET}")
 
-        other_runtimes = [rt for rt in runtimes if rt.name != selected_rt.name]
-        for ort in other_runtimes:
-            matched = None
-            for rm in ort.models:
-                if (rm.lower() == selected_model.lower()
-                        or selected_model.lower() in rm.lower()
-                        or rm.lower() in selected_model.lower()):
-                    matched = rm
-                    break
-            if not matched and len(ort.models) == 1:
-                matched = ort.models[0]
-            if matched and prompt_yes_no(f"  Also benchmark on {ort.name} ({matched})?"):
-                print(f"\n  {runtime_badge(ort.name)} Benchmarking {BOLD}{matched}{RESET}...")
-                results = run_benchmark_suite(ort, matched, prompt_type, num_runs, progress_callback=progress)
+            if selected_rt is None:
+                print(f"\n  {runtime_badge('llama.cpp-cli')} Benchmarking...")
+                cli_results = []
+                for i in range(1, num_runs + 1):
+                    label = "warmup" if i == 1 and num_runs > 1 else f"run {i}"
+                    current = monitor.get_current()
+                    mem_str = f" {format_mini_memory_bar(current)}" if current else ""
+                    print(f"    {DIM}[{label}/{num_runs}]{RESET}{mem_str}", end=" ", flush=True)
+                    r = benchmark_llama_cpp_native(selected_model, BENCH_PROMPTS[prompt_type], run_number=i)
+                    cli_results.append(r)
                 print()
-                all_results[ort.name] = results
+                key = f"llama.cpp-cli ({prompt_type})" if run_all else "llama.cpp-cli"
+                all_results[key] = cli_results
+            else:
+                print(f"\n  {runtime_badge(selected_rt.name)} Benchmarking {BOLD}{selected_model}{RESET}...")
+                def progress(run: int, total: int) -> None:
+                    label = "warmup" if run == 1 and total > 1 else f"run {run}"
+                    current = monitor.get_current()
+                    mem_str = f" {format_mini_memory_bar(current)}" if current else ""
+                    print(f"    {DIM}[{label}/{total}]{RESET}{mem_str}", end=" ", flush=True)
 
-    mem_report = monitor.stop()
+                results = run_benchmark_suite(selected_rt, selected_model, prompt_type, num_runs, progress_callback=progress)
+                print()
+                key = f"{selected_rt.name} ({prompt_type})" if run_all else selected_rt.name
+                all_results[key] = results
 
-    _display_benchmark_comparison(all_results, num_runs, mem_report)
-    input(f"\n  {DIM}Press Enter to continue...{RESET}")
+                other_runtimes = [rt for rt in runtimes if rt.name != selected_rt.name]
+                for ort in other_runtimes:
+                    matched = None
+                    for rm in ort.models:
+                        if (rm.lower() == selected_model.lower()
+                                or selected_model.lower() in rm.lower()
+                                or rm.lower() in selected_model.lower()):
+                            matched = rm
+                            break
+                    if not matched and len(ort.models) == 1:
+                        matched = ort.models[0]
+                    if matched and prompt_yes_no(f"  Also benchmark on {ort.name} ({matched})?"):
+                        print(f"\n  {runtime_badge(ort.name)} Benchmarking {BOLD}{matched}{RESET}...")
+                        results = run_benchmark_suite(ort, matched, prompt_type, num_runs, progress_callback=progress)
+                        print()
+                        key = f"{ort.name} ({prompt_type})" if run_all else ort.name
+                        all_results[key] = results
+
+        mem_report = monitor.stop()
+
+        _display_benchmark_comparison(all_results, num_runs, mem_report)
+
+        # Offer to run another benchmark with the same model
+        after_options = [
+            f"{BOLD}Run another prompt{RESET}   -- Same model, different prompt",
+            f"{BOLD}Change model{RESET}          -- Pick a different model",
+            f"{BOLD}Back to menu{RESET}          -- Return to main menu",
+        ]
+        aidx = prompt_choice("What next?", after_options, allow_back=False)
+        if aidx == 0:
+            # Loop continues — same model, pick new prompt
+            continue
+        elif aidx == 1:
+            # Re-select model then loop
+            midx = prompt_choice("Select model to benchmark:", model_display)
+            if midx is None:
+                return
+            selected_rt, selected_model = all_model_ids[midx]
+            continue
+        else:
+            return
 
 
 # ── Main Loop ────────────────────────────────────────────────────────────────
