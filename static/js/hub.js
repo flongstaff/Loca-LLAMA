@@ -29,8 +29,8 @@ async function searchHub() {
       .map(
         (m) => `<tr data-repo="${escapeHtml(m.repo_id)}" style="cursor:pointer">
           <td>${escapeHtml(m.repo_id)}</td>
-          <td>${formatDownloads(m.downloads)}</td>
-          <td>${m.likes}</td>
+          <td class="num">${formatDownloads(m.downloads)}</td>
+          <td class="num">${m.likes}</td>
           <td>${m.is_gguf ? '<span class="badge comfortable">GGUF</span>' : ""}${m.is_mlx ? '<span class="badge full-gpu">MLX</span>' : ""}</td>
           <td>${m.pipeline_tag ? escapeHtml(m.pipeline_tag) : "—"}</td>
         </tr>`
@@ -74,7 +74,7 @@ async function showRepoFiles(repoId) {
       .map(
         (f) => `<tr>
           <td>${escapeHtml(f.filename)}</td>
-          <td>${f.size > 0 ? formatSizeGb(f.size / (1024 * 1024 * 1024)) : "—"}</td>
+          <td class="num">${f.size > 0 ? formatSizeGb(f.size / (1024 * 1024 * 1024)) : "—"}</td>
         </tr>`
       )
       .join("");

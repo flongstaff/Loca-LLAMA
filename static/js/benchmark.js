@@ -200,14 +200,14 @@ function renderBenchmarkStatus(data) {
     const rows = data.runs
       .map(
         (r) => `<tr class="${r.success ? "" : "error-row"}">
-          <td>${r.run_number}</td>
+          <td class="num">${r.run_number}</td>
           <td>${r.success ? "Pass" : "Fail"}</td>
-          <td>${r.tokens_per_second}</td>
-          <td>${r.prompt_tokens_per_second}</td>
-          <td>${r.time_to_first_token_ms}</td>
-          <td>${r.total_time_ms}</td>
-          <td>${r.prompt_tokens}</td>
-          <td>${r.generated_tokens}</td>
+          <td class="num">${r.tokens_per_second}</td>
+          <td class="num">${r.prompt_tokens_per_second}</td>
+          <td class="num">${r.time_to_first_token_ms}</td>
+          <td class="num">${r.total_time_ms}</td>
+          <td class="num">${r.prompt_tokens}</td>
+          <td class="num">${r.generated_tokens}</td>
         </tr>`
       )
       .join("");
@@ -512,17 +512,17 @@ function renderSweepStatus(data) {
         return `<tr><td>${escapeHtml(cr.model_id)}</td><td colspan="6" style="color:var(--danger)">Failed</td></tr>`;
       }
       const cls = (val, best, lower) => {
-        if (lower ? val <= best : val >= best) return ' class="best-value"';
-        return "";
+        const isBest = lower ? val <= best : val >= best;
+        return isBest ? "num best-value" : "num";
       };
       return `<tr>
         <td>${escapeHtml(cr.model_id)}</td>
-        <td${cls(a.avg_tok_per_sec, bestTokSec)}>${a.avg_tok_per_sec}</td>
-        <td${cls(a.min_tok_per_sec, bestTokSec)}>${a.min_tok_per_sec}</td>
-        <td${cls(a.max_tok_per_sec, bestTokSec)}>${a.max_tok_per_sec}</td>
-        <td${cls(a.avg_prefill_tok_per_sec, bestPrefill)}>${a.avg_prefill_tok_per_sec}</td>
-        <td${cls(a.avg_ttft_ms, bestTtft, true)}>${a.avg_ttft_ms} ms</td>
-        <td>${a.runs}</td>
+        <td class="${cls(a.avg_tok_per_sec, bestTokSec)}">${a.avg_tok_per_sec}</td>
+        <td class="${cls(a.min_tok_per_sec, bestTokSec)}">${a.min_tok_per_sec}</td>
+        <td class="${cls(a.max_tok_per_sec, bestTokSec)}">${a.max_tok_per_sec}</td>
+        <td class="${cls(a.avg_prefill_tok_per_sec, bestPrefill)}">${a.avg_prefill_tok_per_sec}</td>
+        <td class="${cls(a.avg_ttft_ms, bestTtft, true)}">${a.avg_ttft_ms} ms</td>
+        <td class="num">${a.runs}</td>
       </tr>`;
     })
     .join("");

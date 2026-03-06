@@ -33,10 +33,10 @@ async function loadModels(family) {
         (m) => `<tr>
         <td>${escapeHtml(m.name)}</td>
         <td>${escapeHtml(m.family)}</td>
-        <td>${m.params_billion}B</td>
-        <td>${(m.default_context_length / 1024).toFixed(0)}K</td>
-        <td>${(m.max_context_length / 1024).toFixed(0)}K</td>
-        <td>${m.num_layers}</td>
+        <td class="num">${m.params_billion}B</td>
+        <td class="num">${(m.default_context_length / 1024).toFixed(0)}K</td>
+        <td class="num">${(m.max_context_length / 1024).toFixed(0)}K</td>
+        <td class="num">${m.num_layers}</td>
         <td>${escapeHtml(m.license)}</td>
       </tr>`
       )

@@ -170,11 +170,11 @@ function renderCompatTable() {
     .map(
       (r) => `<tr data-model="${escapeHtml(r.model_name)}" style="cursor:pointer">
         <td>${escapeHtml(r.model_name)}</td>
-        <td>${r.total_memory_gb.toFixed(1)}</td>
-        <td>${r.headroom_gb.toFixed(1)}</td>
-        <td>${r.memory_utilization_pct.toFixed(0)}%</td>
+        <td class="num">${r.total_memory_gb.toFixed(1)}</td>
+        <td class="num">${r.headroom_gb.toFixed(1)}</td>
+        <td class="num">${r.memory_utilization_pct.toFixed(0)}%</td>
         <td><span class="badge ${tierToCssClass(r.tier)}">${escapeHtml(r.tier_label)}</span></td>
-        <td>${r.estimated_tok_per_sec != null ? r.estimated_tok_per_sec.toFixed(1) : "—"}</td>
+        <td class="num">${r.estimated_tok_per_sec != null ? r.estimated_tok_per_sec.toFixed(1) : "—"}</td>
       </tr>`
     )
     .join("");

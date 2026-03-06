@@ -146,10 +146,10 @@ function renderHardwareTable(hardware) {
     .map(
       (hw) => `<tr>
         <td>${escapeHtml(hw.name)}</td>
-        <td>${hw.memory_gb} GB</td>
+        <td class="num">${hw.memory_gb} GB</td>
         <td><span class="badge ${tierToCssClass(hw.tier)}">${escapeHtml(hw.tier_label)}</span></td>
-        <td>${hw.headroom_gb >= 0 ? "+" : ""}${hw.headroom_gb.toFixed(1)} GB</td>
-        <td>${hw.estimated_tok_per_sec != null ? hw.estimated_tok_per_sec.toFixed(1) : "—"}</td>
+        <td class="num">${hw.headroom_gb >= 0 ? "+" : ""}${hw.headroom_gb.toFixed(1)} GB</td>
+        <td class="num">${hw.estimated_tok_per_sec != null ? hw.estimated_tok_per_sec.toFixed(1) : "—"}</td>
       </tr>`
     )
     .join("");

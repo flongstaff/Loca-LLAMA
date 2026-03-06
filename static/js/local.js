@@ -31,7 +31,7 @@ async function scanLocalModels(customDir) {
       .map(
         (m) => `<tr>
           <td>${escapeHtml(m.name)}</td>
-          <td>${formatSizeGb(m.size_gb)}</td>
+          <td class="num">${formatSizeGb(m.size_gb)}</td>
           <td>${escapeHtml(m.format)}</td>
           <td>${escapeHtml(m.source)}</td>
           <td>${m.quant ? escapeHtml(m.quant) : "—"}</td>
