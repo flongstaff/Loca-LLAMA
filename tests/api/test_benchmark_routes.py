@@ -404,3 +404,120 @@ async def test_prompts_include_json_type(client):
     resp = await client.get("/api/benchmark/prompts")
     assert resp.status_code == 200
     assert "json" in resp.json()["prompts"]
+
+
+# ── Sweep ─────────────────────────────────────────────────────────────────────
+
+MOCK_SWEEP_RESULTS = [
+    {
+        "model_id": "llama-3-8b-q4_k_m",
+        "results": [MOCK_RESULTS[0], MOCK_RESULTS[1]],
+        "aggregate": MOCK_AGGREGATE,
+    },
+    {
+        "model_id": "mistral-7b-q5_k_m",
+        "results": [MOCK_RESULTS[0]],
+        "aggregate": MOCK_AGGREGATE,
+    },
+]
+
+
+@pytest.mark.anyio
+@patch("loca_llama.api.routes.benchmark.detect_all_runtimes", return_value=MOCK_RUNTIMES)
+@patch("loca_llama.api.routes.benchmark.run_benchmark_sweep", return_value=MOCK_SWEEP_RESULTS)
+async def test_start_sweep_creates_job(mock_sweep, mock_detect, client):
+    """POST /api/benchmark/sweep creates a sweep job and returns job_id."""
+    resp = await client.post("/api/benchmark/sweep", json={
+        "runtime_name": "lm-studio",
+        "model_ids": ["llama-3-8b-q4_k_m", "mistral-7b-q5_k_m"],
+        "prompt_type": "default",
+        "num_runs": 2,
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "job_id" in data
+    assert data["status"] == "running"
+
+
+@pytest.mark.anyio
+@patch("loca_llama.api.routes.benchmark.detect_all_runtimes", return_value=MOCK_RUNTIMES)
+async def test_start_sweep_unknown_runtime(mock_detect, client):
+    """POST /api/benchmark/sweep rejects unknown runtime."""
+    resp = await client.post("/api/benchmark/sweep", json={
+        "runtime_name": "nonexistent-runtime",
+        "model_ids": ["llama-3-8b-q4_k_m"],
+    })
+    assert resp.status_code == 400
+    assert "not found" in resp.json()["detail"].lower()
+
+
+@pytest.mark.anyio
+@patch("loca_llama.api.routes.benchmark.detect_all_runtimes", return_value=MOCK_RUNTIMES)
+async def test_start_sweep_missing_models(mock_detect, client):
+    """POST /api/benchmark/sweep rejects models not loaded in the runtime."""
+    resp = await client.post("/api/benchmark/sweep", json={
+        "runtime_name": "lm-studio",
+        "model_ids": ["llama-3-8b-q4_k_m", "not-loaded-model"],
+    })
+    assert resp.status_code == 400
+    assert "not loaded" in resp.json()["detail"].lower()
+
+
+@pytest.mark.anyio
+@patch("loca_llama.api.routes.benchmark.detect_all_runtimes", return_value=MOCK_RUNTIMES)
+async def test_start_sweep_unknown_prompt_type(mock_detect, client):
+    """POST /api/benchmark/sweep rejects unknown prompt_type."""
+    resp = await client.post("/api/benchmark/sweep", json={
+        "runtime_name": "lm-studio",
+        "model_ids": ["llama-3-8b-q4_k_m"],
+        "prompt_type": "invalid_type",
+    })
+    assert resp.status_code == 400
+    assert "unknown prompt_type" in resp.json()["detail"].lower()
+
+
+@pytest.mark.anyio
+@patch("loca_llama.api.routes.benchmark.detect_all_runtimes", return_value=MOCK_RUNTIMES)
+@patch("loca_llama.api.routes.benchmark.run_benchmark_sweep", return_value=MOCK_SWEEP_RESULTS)
+async def test_sweep_status_complete(mock_sweep, mock_detect, client):
+    """GET /api/benchmark/sweep/{job_id} returns completed results."""
+    # Start sweep
+    resp = await client.post("/api/benchmark/sweep", json={
+        "runtime_name": "lm-studio",
+        "model_ids": ["llama-3-8b-q4_k_m", "mistral-7b-q5_k_m"],
+        "num_runs": 2,
+    })
+    job_id = resp.json()["job_id"]
+
+    # Wait for background task to complete
+    await asyncio.sleep(0.15)
+
+    # Poll status
+    resp = await client.get(f"/api/benchmark/sweep/{job_id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "complete"
+    assert data["combo_results"] is not None
+    assert len(data["combo_results"]) == 2
+    assert data["combo_results"][0]["model_id"] == "llama-3-8b-q4_k_m"
+    assert data["combo_results"][1]["model_id"] == "mistral-7b-q5_k_m"
+
+
+@pytest.mark.anyio
+async def test_sweep_status_not_found(client):
+    """GET /api/benchmark/sweep/{job_id} returns 404 for unknown job."""
+    resp = await client.get("/api/benchmark/sweep/nonexistent-job-id")
+    assert resp.status_code == 404
+
+
+@pytest.mark.anyio
+@patch("loca_llama.api.routes.benchmark.detect_all_runtimes", return_value=MOCK_RUNTIMES)
+async def test_start_sweep_custom_prompt_required(mock_detect, client):
+    """POST /api/benchmark/sweep with prompt_type=custom requires custom_prompt."""
+    resp = await client.post("/api/benchmark/sweep", json={
+        "runtime_name": "lm-studio",
+        "model_ids": ["llama-3-8b-q4_k_m"],
+        "prompt_type": "custom",
+    })
+    assert resp.status_code == 400
+    assert "custom_prompt" in resp.json()["detail"].lower()

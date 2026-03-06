@@ -1,5 +1,6 @@
 import { api } from "./api.js";
 import { escapeHtml, tierToCssClass } from "./utils.js";
+import { drawBarChart } from "./chart.js";
 
 let debounceTimer = null;
 let calculatorModels = [];
@@ -75,6 +76,7 @@ async function runEstimate() {
   try {
     const data = await api.post("/calculator/estimate", params);
     renderBreakdown(data);
+    renderBreakdownChart(data);
     renderHardwareTable(data.compatible_hardware);
   } catch (err) {
     document.getElementById("calc-total").textContent = "Error";
@@ -94,6 +96,41 @@ function renderBreakdown(data) {
     `${data.total_memory_gb.toFixed(2)} GB`;
   document.getElementById("calc-disk-size").textContent =
     `${data.on_disk_size_gb.toFixed(2)} GB`;
+}
+
+function renderBreakdownChart(data) {
+  const canvas = document.getElementById("calc-breakdown-chart");
+  if (!canvas) return;
+
+  // Stacked bar for VRAM breakdown + individual bars for compatible hardware
+  const chartData = [
+    {
+      label: "Required",
+      segments: [
+        { label: "Model", value: data.model_size_gb, color: "#6c8cff" },
+        { label: "KV Cache", value: data.kv_cache_gb, color: "#4caf50" },
+        { label: "Overhead", value: data.overhead_gb, color: "#ff9800" },
+      ],
+    },
+  ];
+
+  // Add top compatible hardware entries for comparison
+  if (data.compatible_hardware && data.compatible_hardware.length > 0) {
+    const top = data.compatible_hardware.slice(0, 5);
+    for (const hw of top) {
+      chartData.push({
+        label: hw.name,
+        value: hw.memory_gb,
+        color: hw.headroom_gb >= 8 ? "#4caf50" : hw.headroom_gb >= 0 ? "#ff9800" : "#f44336",
+      });
+    }
+  }
+
+  drawBarChart(canvas, chartData, {
+    title: "Memory Breakdown vs Hardware",
+    unit: " GB",
+    height: 200,
+  });
 }
 
 function renderHardwareTable(hardware) {
@@ -164,6 +201,9 @@ export function initCalculator() {
 
   // KV bits select
   document.getElementById("calc-kv-bits").addEventListener("change", scheduleEstimate);
+
+  // Re-render chart on theme change
+  document.addEventListener("themechange", () => scheduleEstimate());
 
   // Run initial estimate with default values
   runEstimate();
