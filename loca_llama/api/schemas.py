@@ -146,6 +146,41 @@ class MaxContextResponse(BaseModel):
     max_context_k: str
 
 
+# ── Recommend ───────────────────────────────────────────────────────────────
+
+class RecommendRequest(BaseModel):
+    hardware_name: str
+    use_case: Literal["general", "coding", "reasoning", "small", "large-context"] = "general"
+
+
+class RecommendItem(BaseModel):
+    rank: int
+    model_name: str
+    quant_name: str
+    tier: str
+    tier_label: str
+    model_size_gb: float
+    kv_cache_gb: float
+    overhead_gb: float
+    total_memory_gb: float
+    available_memory_gb: float
+    headroom_gb: float
+    memory_utilization_pct: float
+    estimated_tok_per_sec: float | None
+    gpu_layers: int | None
+    total_layers: int | None
+    offload_pct: float | None
+    context_length: int
+    max_context_k: str
+
+
+class RecommendResponse(BaseModel):
+    recommendations: list[RecommendItem]
+    count: int
+    hardware: str
+    use_case: str
+
+
 # ── Calculator ──────────────────────────────────────────────────────────────
 
 class CalculatorEstimateRequest(BaseModel):

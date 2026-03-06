@@ -9,7 +9,7 @@ from .quantization import QUANT_FORMATS, RECOMMENDED_FORMATS
 from .analyzer import (
     analyze_model, analyze_all, max_context_for_model,
     estimate_model_size_gb, estimate_kv_cache_gb, estimate_kv_cache_raw,
-    estimate_overhead_gb,
+    estimate_overhead_gb, recommend_models,
 )
 
 
@@ -430,48 +430,15 @@ def cmd_recommend(args) -> None:
         sys.exit(1)
 
     use_case = args.use_case
-
-    # Filter models by use case
-    if use_case == "coding":
-        families = ["Qwen", "CodeLlama", "StarCoder", "DeepSeek"]
-        models = [m for m in MODELS if m.family in families]
-    elif use_case == "reasoning":
-        models = [m for m in MODELS if "R1" in m.name or "DeepSeek" in m.family or m.family == "Qwen"]
-    elif use_case == "small":
-        models = [m for m in MODELS if m.params_billion <= 8]
-    elif use_case == "large-context":
-        models = [m for m in MODELS if m.max_context_length >= 65536]
-    else:
-        models = list(MODELS)
-
     hw_label = args.hw or f"{mac.chip} {mac.memory_gb}GB"
     print_header(f"Recommendations — {hw_label} ({use_case})")
     print_hw_summary(mac)
 
-    # Find best configs: prioritize quality (higher quant) that still fits well
-    recommendations = []
-    seen_models = set()
-    for quant_name in ["Q6_K", "Q5_K_M", "Q4_K_M", "Q8_0", "Q3_K_L"]:
-        if quant_name not in QUANT_FORMATS:
-            continue
-        quant = QUANT_FORMATS[quant_name]
-        for model in sorted(models, key=lambda m: m.params_billion, reverse=True):
-            if model.name in seen_models:
-                continue
-            result = analyze_model(mac, model, quant)
-            if result.fits_in_memory and result.memory_utilization_pct <= 90:
-                recommendations.append(result)
-                seen_models.add(model.name)
+    top = recommend_models(mac, use_case=use_case, top_n=8)
 
-    if not recommendations:
+    if not top:
         print(f"  {RED}No good recommendations found for this use case.{RESET}")
         return
-
-    # Sort by params (larger = more capable)
-    recommendations.sort(key=lambda r: r.model.params_billion, reverse=True)
-
-    # Show top picks
-    top = recommendations[:8]
     print(f"  {BOLD}Top picks (best quality quant that fits comfortably):{RESET}\n")
 
     # Column widths

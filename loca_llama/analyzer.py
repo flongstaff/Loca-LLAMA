@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from enum import Enum
 from .hardware import MacSpec
-from .models import LLMModel
+from .models import LLMModel, MODELS
 from .quantization import QuantFormat, QUANT_FORMATS, RECOMMENDED_FORMATS
 
 
@@ -316,3 +316,50 @@ def max_context_for_model(
             hi = mid - 1
 
     return lo
+
+
+# ── Use-case filtering ──────────────────────────────────────────────────────
+
+USE_CASE_FILTERS: dict[str, callable] = {
+    "coding": lambda m: m.family in ("Qwen", "CodeLlama", "StarCoder", "DeepSeek"),
+    "reasoning": lambda m: "R1" in m.name or m.family in ("DeepSeek", "Qwen"),
+    "small": lambda m: m.params_billion <= 8,
+    "large-context": lambda m: m.max_context_length >= 65536,
+}
+
+VALID_USE_CASES = ["general", "coding", "reasoning", "small", "large-context"]
+
+_RECOMMEND_QUANT_ORDER = ["Q6_K", "Q5_K_M", "Q4_K_M", "Q8_0", "Q3_K_L"]
+
+
+def recommend_models(
+    mac: MacSpec,
+    use_case: str = "general",
+    top_n: int = 8,
+) -> list[ModelEstimate]:
+    """Find the best model+quant combos that fit comfortably on the given hardware.
+
+    Algorithm: iterate quant formats in quality order, test each model,
+    keep the first (best-quant) result per model that fits at <=90% utilization,
+    sort by params descending, return top N.
+    """
+    filt = USE_CASE_FILTERS.get(use_case)
+    models = [m for m in MODELS if filt(m)] if filt else list(MODELS)
+
+    recommendations: list[ModelEstimate] = []
+    seen_models: set[str] = set()
+
+    for quant_name in _RECOMMEND_QUANT_ORDER:
+        if quant_name not in QUANT_FORMATS:
+            continue
+        quant = QUANT_FORMATS[quant_name]
+        for model in sorted(models, key=lambda m: m.params_billion, reverse=True):
+            if model.name in seen_models:
+                continue
+            result = analyze_model(mac, model, quant)
+            if result.fits_in_memory and result.memory_utilization_pct <= 90:
+                recommendations.append(result)
+                seen_models.add(model.name)
+
+    recommendations.sort(key=lambda r: r.model.params_billion, reverse=True)
+    return recommendations[:top_n]
