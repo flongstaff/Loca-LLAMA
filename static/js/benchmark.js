@@ -1,5 +1,6 @@
 import { api } from "./api.js";
 import { escapeHtml } from "./utils.js";
+import { drawBarChart, drawLineChart } from "./chart.js";
 
 let benchRuntimes = [];
 let benchJobId = null;
@@ -7,6 +8,8 @@ let benchPollTimer = null;
 let streamSource = null;
 let sweepJobId = null;
 let sweepPollTimer = null;
+let lastBenchResult = null;
+let lastSweepResult = null;
 
 async function detectRuntimes() {
   const btn = document.getElementById("detect-runtimes-btn");
@@ -218,7 +221,30 @@ function renderBenchmarkStatus(data) {
       </table>`;
   }
 
+  // Export button
+  html += `<button class="btn btn-export" id="bench-export-btn" style="margin-top:0.75rem;">Export JSON</button>`;
+
+  // Per-run chart canvas
+  if (data.runs && data.runs.length > 1) {
+    html += `<div class="chart-container" style="margin-top:1rem;"><canvas id="bench-runs-chart"></canvas></div>`;
+  }
+
   resultsDiv.innerHTML = html;
+  lastBenchResult = data;
+
+  // Draw per-run line chart
+  if (data.runs && data.runs.length > 1) {
+    const chartData = data.runs
+      .filter((r) => r.success)
+      .map((r) => ({ label: `#${r.run_number}`, value: r.tokens_per_second }));
+    const canvas = document.getElementById("bench-runs-chart");
+    if (canvas && chartData.length > 1) {
+      drawLineChart(canvas, chartData, { title: "tok/s per Run", unit: "", height: 180, showDots: true });
+    }
+  }
+
+  // Wire export button
+  document.getElementById("bench-export-btn").addEventListener("click", () => exportJson(lastBenchResult, "benchmark"));
 }
 
 function onPromptTypeChange() {
@@ -510,7 +536,40 @@ function renderSweepStatus(data) {
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
+      <button class="btn btn-export" id="sweep-export-btn" style="margin-top:0.75rem;">Export JSON</button>
+      <div class="chart-container" style="margin-top:1rem;"><canvas id="bench-sweep-chart"></canvas></div>
     </div>`;
+
+  lastSweepResult = data;
+
+  // Draw sweep bar chart comparing tok/s across models
+  if (aggregates.length > 0) {
+    const chartData = aggregates.map((a) => ({
+      label: a.model_id.split("/").pop(),
+      value: a.avg_tok_per_sec,
+    }));
+    const canvas = document.getElementById("bench-sweep-chart");
+    if (canvas) {
+      drawBarChart(canvas, chartData, { title: "Avg tok/s by Model", unit: "", height: 250 });
+    }
+  }
+
+  // Wire export button
+  document.getElementById("sweep-export-btn").addEventListener("click", () => exportJson(lastSweepResult, "sweep"));
+}
+
+function exportJson(data, prefix) {
+  if (!data) return;
+  const json = JSON.stringify(data, null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${prefix}-${Date.now()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 export function initBenchmark() {
