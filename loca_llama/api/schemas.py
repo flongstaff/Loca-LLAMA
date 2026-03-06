@@ -367,6 +367,39 @@ class BenchmarkPromptsResponse(BaseModel):
     prompts: dict[str, str]
 
 
+# ── Sweep ───────────────────────────────────────────────────────────────────
+
+class SweepStartRequest(BaseModel):
+    runtime_name: str
+    model_ids: list[str] = Field(..., min_length=1, max_length=20)
+    prompt_type: str = "default"
+    num_runs: int = Field(default=3, ge=1, le=10)
+    max_tokens: int = Field(default=200, ge=1, le=4096)
+    context_length: int = 4096
+    custom_prompt: str | None = None
+
+
+class SweepComboResult(BaseModel):
+    model_id: str
+    runs: list[BenchmarkRunResult] | None = None
+    aggregate: BenchmarkAggregate | None = None
+
+
+class SweepProgress(BaseModel):
+    current_combo: int
+    total_combos: int
+    current_run_in_combo: int
+    total_runs_per_combo: int
+
+
+class SweepStatusResponse(BaseModel):
+    job_id: str
+    status: str
+    progress: SweepProgress | None = None
+    combo_results: list[SweepComboResult] | None = None
+    error: str | None = None
+
+
 # ── Memory ───────────────────────────────────────────────────────────────────
 
 class MemoryCurrentResponse(BaseModel):

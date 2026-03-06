@@ -29,6 +29,7 @@ from loca_llama.benchmark import (
     detect_llama_cpp_server,
     detect_lm_studio,
     run_benchmark_suite,
+    run_benchmark_sweep,
 )
 
 
@@ -1048,3 +1049,74 @@ class TestBenchmarkOpenaiApiStreaming:
         body = json.loads(req.data)
         assert body["stream"] is True
         assert body["model"] == "test-model"
+
+
+# ── run_benchmark_sweep ──────────────────────────────────────────────────────
+
+class TestRunBenchmarkSweep:
+    """Tests for run_benchmark_sweep()."""
+
+    _RUNTIME = RuntimeInfo(
+        name="lm-studio", url="http://localhost:1234",
+        models=["model-a", "model-b"], version="0.3",
+    )
+
+    def _mock_suite(self, runtime, model_id, *args, **kwargs):
+        """Return two fake results tagged with the model_id."""
+        return [
+            _make_success_result(model_name=model_id, run_number=1),
+            _make_success_result(model_name=model_id, run_number=2),
+        ]
+
+    @patch("loca_llama.benchmark.aggregate_results", return_value={"runs": 1, "avg_tok_per_sec": 50.0})
+    @patch("loca_llama.benchmark.run_benchmark_suite")
+    def test_should_return_one_combo_per_model(self, mock_suite, mock_agg):
+        """Returns one combo result dict per model in the list."""
+        mock_suite.side_effect = self._mock_suite
+        results = run_benchmark_sweep(self._RUNTIME, ["model-a", "model-b"])
+        assert len(results) == 2
+        assert results[0]["model_id"] == "model-a"
+        assert results[1]["model_id"] == "model-b"
+
+    @patch("loca_llama.benchmark.aggregate_results", return_value={"runs": 1})
+    @patch("loca_llama.benchmark.run_benchmark_suite")
+    def test_should_call_combo_callback_for_each_model(self, mock_suite, mock_agg):
+        """combo_callback is invoked once per model with 1-based index."""
+        mock_suite.side_effect = self._mock_suite
+        cb = MagicMock()
+        run_benchmark_sweep(self._RUNTIME, ["model-a", "model-b"], combo_callback=cb)
+        assert cb.call_count == 2
+        cb.assert_any_call(1, 2)
+        cb.assert_any_call(2, 2)
+
+    @patch("loca_llama.benchmark.aggregate_results", return_value={"runs": 1})
+    @patch("loca_llama.benchmark.run_benchmark_suite")
+    def test_should_forward_run_callback_to_suite(self, mock_suite, mock_agg):
+        """run_callback is passed through to run_benchmark_suite as progress_callback."""
+        mock_suite.side_effect = self._mock_suite
+        run_cb = MagicMock()
+        run_benchmark_sweep(self._RUNTIME, ["model-a"], run_callback=run_cb)
+        # run_callback is the 7th positional arg to run_benchmark_suite
+        suite_call = mock_suite.call_args
+        assert suite_call[0][6] is run_cb  # progress_callback arg
+
+    @patch("loca_llama.benchmark.aggregate_results", return_value={"runs": 1})
+    @patch("loca_llama.benchmark.run_benchmark_suite")
+    def test_should_forward_custom_prompt(self, mock_suite, mock_agg):
+        """custom_prompt is passed through to run_benchmark_suite."""
+        mock_suite.side_effect = self._mock_suite
+        run_benchmark_sweep(
+            self._RUNTIME, ["model-a"],
+            custom_prompt="My custom prompt",
+        )
+        suite_call = mock_suite.call_args
+        assert suite_call[0][7] == "My custom prompt"  # custom_prompt arg
+
+    @patch("loca_llama.benchmark.aggregate_results")
+    @patch("loca_llama.benchmark.run_benchmark_suite")
+    def test_should_aggregate_each_combo(self, mock_suite, mock_agg):
+        """aggregate_results is called once per model combo."""
+        mock_suite.side_effect = self._mock_suite
+        mock_agg.return_value = {"runs": 1}
+        run_benchmark_sweep(self._RUNTIME, ["model-a", "model-b"])
+        assert mock_agg.call_count == 2

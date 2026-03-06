@@ -578,6 +578,54 @@ th.sort-desc::after {
   .memory-stats { grid-template-columns: 1fr; }
 }
 
+/* ── Sweep Mode ─────────────────────────────────────────────────────── */
+
+.sweep-section {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.sweep-model-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.sweep-model-list label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.6rem;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.sweep-model-list label:hover {
+  border-color: var(--accent);
+}
+
+.sweep-model-list label.checked {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-card));
+}
+
+.sweep-comparison table {
+  width: 100%;
+}
+
+.sweep-comparison .best-value {
+  color: var(--success);
+  font-weight: 600;
+}
+
 /* ── Footer ──────────────────────────────────────────────────────────── */
 
 footer {

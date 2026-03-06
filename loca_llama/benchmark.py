@@ -345,6 +345,42 @@ def run_benchmark_suite(
     return results
 
 
+def run_benchmark_sweep(
+    runtime: RuntimeInfo,
+    model_ids: list[str],
+    prompt_type: str = "default",
+    num_runs: int = 3,
+    max_tokens: int = BENCH_MAX_TOKENS,
+    context_length: int = 4096,
+    combo_callback: object = None,
+    run_callback: object = None,
+    custom_prompt: str | None = None,
+) -> list[dict]:
+    """Run benchmark suite for multiple models sequentially.
+
+    Returns list of dicts, one per model:
+      {"model_id": str, "results": list[BenchmarkResult], "aggregate": dict}
+    """
+    combo_results: list[dict] = []
+
+    for combo_idx, model_id in enumerate(model_ids):
+        if combo_callback:
+            combo_callback(combo_idx + 1, len(model_ids))
+
+        results = run_benchmark_suite(
+            runtime, model_id, prompt_type, num_runs, max_tokens,
+            context_length, run_callback, custom_prompt,
+        )
+        agg = aggregate_results(results)
+        combo_results.append({
+            "model_id": model_id,
+            "results": results,
+            "aggregate": agg,
+        })
+
+    return combo_results
+
+
 def aggregate_results(results: list[BenchmarkResult], skip_first: bool = True) -> dict:
     """Aggregate multiple benchmark runs, optionally skipping warmup."""
     successful = [r for r in results if r.success]

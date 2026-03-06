@@ -5,6 +5,8 @@ let benchRuntimes = [];
 let benchJobId = null;
 let benchPollTimer = null;
 let streamSource = null;
+let sweepJobId = null;
+let sweepPollTimer = null;
 
 async function detectRuntimes() {
   const btn = document.getElementById("detect-runtimes-btn");
@@ -75,6 +77,9 @@ function onRuntimeChange() {
   modelSelect.disabled = false;
   startBtn.disabled = false;
   streamBtn.disabled = false;
+
+  // Populate sweep model checkboxes
+  populateSweepModels(rt.models);
 }
 
 async function startBenchmark() {
@@ -318,10 +323,202 @@ function cleanupStream() {
   streamBtn.textContent = "Stream";
 }
 
+// ── Sweep Mode ─────────────────────────────────────────────────────────
+
+function onSweepToggle() {
+  const checked = document.getElementById("bench-sweep-toggle").checked;
+  document.getElementById("bench-sweep-controls").style.display = checked ? "block" : "none";
+}
+
+function populateSweepModels(models) {
+  const container = document.getElementById("bench-sweep-model-list");
+  if (!models || models.length === 0) {
+    container.innerHTML = '<p class="placeholder">No models loaded in this runtime.</p>';
+    document.getElementById("bench-sweep-start-btn").disabled = true;
+    return;
+  }
+
+  container.innerHTML = "";
+  models.forEach((m) => {
+    const label = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.value = m;
+    cb.addEventListener("change", () => {
+      label.classList.toggle("checked", cb.checked);
+      updateSweepStartBtn();
+    });
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(m));
+    container.appendChild(label);
+  });
+  updateSweepStartBtn();
+}
+
+function getSelectedSweepModels() {
+  const checkboxes = document.querySelectorAll("#bench-sweep-model-list input[type=checkbox]:checked");
+  return Array.from(checkboxes).map((cb) => cb.value);
+}
+
+function updateSweepStartBtn() {
+  const selected = getSelectedSweepModels();
+  document.getElementById("bench-sweep-start-btn").disabled = selected.length < 2;
+}
+
+async function startSweep() {
+  const runtimeName = document.getElementById("bench-runtime-select").value;
+  const modelIds = getSelectedSweepModels();
+  const promptType = document.getElementById("bench-prompt-select").value;
+  const numRuns = parseInt(document.getElementById("bench-runs-input").value, 10) || 3;
+
+  if (!runtimeName || modelIds.length < 2) return;
+
+  const sweepBtn = document.getElementById("bench-sweep-start-btn");
+  const statusDiv = document.getElementById("bench-status");
+  const sweepResults = document.getElementById("bench-sweep-results");
+
+  sweepBtn.disabled = true;
+  sweepBtn.textContent = "Sweeping…";
+  sweepResults.innerHTML = "";
+  document.getElementById("bench-results").innerHTML = "";
+  statusDiv.innerHTML = '<p class="loading">Starting sweep…</p>';
+
+  const body = {
+    runtime_name: runtimeName,
+    model_ids: modelIds,
+    prompt_type: promptType,
+    num_runs: numRuns,
+  };
+  if (promptType === "custom") {
+    body.custom_prompt = document.getElementById("bench-custom-prompt-text").value;
+  }
+
+  try {
+    const data = await api.post("/benchmark/sweep", body);
+    sweepJobId = data.job_id;
+    pollSweepStatus();
+  } catch (err) {
+    statusDiv.innerHTML = `<p class="error-message">${escapeHtml(err.message)}</p>`;
+    sweepBtn.disabled = false;
+    sweepBtn.textContent = "Start Sweep";
+  }
+}
+
+function pollSweepStatus() {
+  if (!sweepJobId) return;
+  clearTimeout(sweepPollTimer);
+
+  const poll = async () => {
+    try {
+      const data = await api.get(`/benchmark/sweep/${sweepJobId}`);
+      renderSweepStatus(data);
+
+      if (data.status === "running") {
+        sweepPollTimer = setTimeout(poll, 1000);
+      } else {
+        const btn = document.getElementById("bench-sweep-start-btn");
+        btn.disabled = false;
+        btn.textContent = "Start Sweep";
+        updateSweepStartBtn();
+      }
+    } catch (err) {
+      document.getElementById("bench-status").innerHTML =
+        `<p class="error-message">${escapeHtml(err.message)}</p>`;
+      const btn = document.getElementById("bench-sweep-start-btn");
+      btn.disabled = false;
+      btn.textContent = "Start Sweep";
+      updateSweepStartBtn();
+    }
+  };
+
+  poll();
+}
+
+function renderSweepStatus(data) {
+  const statusDiv = document.getElementById("bench-status");
+  const sweepResults = document.getElementById("bench-sweep-results");
+
+  if (data.status === "running") {
+    const p = data.progress;
+    const comboPct = p ? Math.round((p.current_combo / p.total_combos) * 100) : 0;
+    statusDiv.innerHTML = `
+      <div class="bench-progress">
+        <span>Model ${p?.current_combo || 0} of ${p?.total_combos || "?"} — run ${p?.current_run_in_combo || 0}/${p?.total_runs_per_combo || "?"}</span>
+        <div class="progress-bar"><div class="progress-fill" style="width:${comboPct}%"></div></div>
+      </div>`;
+    return;
+  }
+
+  if (data.status === "error") {
+    statusDiv.innerHTML = `<p class="error-message">Sweep failed: ${escapeHtml(data.error || "Unknown error")}</p>`;
+    sweepResults.innerHTML = "";
+    return;
+  }
+
+  // Complete — render comparison table
+  statusDiv.innerHTML = '<p style="color:var(--accent)">Sweep complete.</p>';
+
+  if (!data.combo_results || data.combo_results.length === 0) {
+    sweepResults.innerHTML = '<p class="placeholder">No results.</p>';
+    return;
+  }
+
+  // Find best values for highlighting
+  const aggregates = data.combo_results
+    .filter((cr) => cr.aggregate && cr.aggregate.runs > 0)
+    .map((cr) => ({ model_id: cr.model_id, ...cr.aggregate }));
+
+  let bestTokSec = 0;
+  let bestPrefill = 0;
+  let bestTtft = Infinity;
+
+  for (const a of aggregates) {
+    if (a.avg_tok_per_sec > bestTokSec) bestTokSec = a.avg_tok_per_sec;
+    if (a.avg_prefill_tok_per_sec > bestPrefill) bestPrefill = a.avg_prefill_tok_per_sec;
+    if (a.avg_ttft_ms < bestTtft) bestTtft = a.avg_ttft_ms;
+  }
+
+  const rows = data.combo_results
+    .map((cr) => {
+      const a = cr.aggregate;
+      if (!a || a.runs === 0) {
+        return `<tr><td>${escapeHtml(cr.model_id)}</td><td colspan="6" style="color:var(--danger)">Failed</td></tr>`;
+      }
+      const cls = (val, best, lower) => {
+        if (lower ? val <= best : val >= best) return ' class="best-value"';
+        return "";
+      };
+      return `<tr>
+        <td>${escapeHtml(cr.model_id)}</td>
+        <td${cls(a.avg_tok_per_sec, bestTokSec)}>${a.avg_tok_per_sec}</td>
+        <td${cls(a.min_tok_per_sec, bestTokSec)}>${a.min_tok_per_sec}</td>
+        <td${cls(a.max_tok_per_sec, bestTokSec)}>${a.max_tok_per_sec}</td>
+        <td${cls(a.avg_prefill_tok_per_sec, bestPrefill)}>${a.avg_prefill_tok_per_sec}</td>
+        <td${cls(a.avg_ttft_ms, bestTtft, true)}>${a.avg_ttft_ms} ms</td>
+        <td>${a.runs}</td>
+      </tr>`;
+    })
+    .join("");
+
+  sweepResults.innerHTML = `
+    <div class="sweep-comparison">
+      <h3>Sweep Comparison</h3>
+      <table>
+        <thead><tr>
+          <th>Model</th><th>Avg tok/s</th><th>Min tok/s</th><th>Max tok/s</th>
+          <th>Prefill tok/s</th><th>Avg TTFT</th><th>Runs</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
 export function initBenchmark() {
   document.getElementById("detect-runtimes-btn").addEventListener("click", detectRuntimes);
   document.getElementById("bench-runtime-select").addEventListener("change", onRuntimeChange);
   document.getElementById("bench-start-btn").addEventListener("click", startBenchmark);
   document.getElementById("bench-stream-btn").addEventListener("click", startStream);
   document.getElementById("bench-prompt-select").addEventListener("change", onPromptTypeChange);
+  document.getElementById("bench-sweep-toggle").addEventListener("change", onSweepToggle);
+  document.getElementById("bench-sweep-start-btn").addEventListener("click", startSweep);
 }
