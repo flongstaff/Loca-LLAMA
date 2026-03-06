@@ -7,6 +7,8 @@ import { initHub } from "./hub.js";
 import { initBenchmark } from "./benchmark.js";
 import { initMemory } from "./memory.js";
 import { initCalculator } from "./calculator.js";
+import { initRecommend } from "./recommend.js";
+import { initRecommend } from "./recommend.js";
 
 document.addEventListener("DOMContentLoaded", () => {
   console.log("Loca-LLAMA webapp loaded");
@@ -20,4 +22,5 @@ document.addEventListener("DOMContentLoaded", () => {
   initBenchmark();
   initMemory();
   initCalculator();
+  initRecommend();
 });

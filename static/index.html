@@ -41,12 +41,14 @@
     </div>
     <nav>
       <button data-tab="compatibility" class="active">Compatibility</button>
+      <button data-tab="recommend">Recommend</button>
       <button data-tab="models">Models</button>
       <button data-tab="local">Local Models</button>
       <button data-tab="hub">HuggingFace</button>
       <button data-tab="benchmark">Benchmark</button>
       <button data-tab="memory">Memory</button>
       <button data-tab="calculator">Calculator</button>
+      <button data-tab="recommend">Recommend</button>
     </nav>
   </header>
 
@@ -73,6 +75,30 @@
       <div id="compat-summary"></div>
       <div id="compat-results"></div>
       <div id="compat-detail" class="detail-panel hidden"></div>
+    </section>
+
+    <section id="tab-recommend" class="tab-content">
+      <h2>Recommendations</h2>
+      <div class="controls">
+        <label>Hardware
+          <select id="rec-hw-select"><option value="">Loading…</option></select>
+        </label>
+        <button class="btn btn-secondary" id="rec-detect-hw-btn" aria-label="Detect my Mac hardware automatically">Detect My Mac</button>
+        <span id="rec-detect-hw-feedback" class="detect-feedback" aria-live="polite"></span>
+        <label>Use Case
+          <select id="rec-usecase-select">
+            <option value="general">General</option>
+            <option value="coding">Coding</option>
+            <option value="reasoning">Reasoning</option>
+            <option value="small">Small Models</option>
+            <option value="large-context">Large Context</option>
+          </select>
+        </label>
+        <button class="btn" id="rec-analyze-btn" disabled>Get Recommendations</button>
+      </div>
+      <div id="rec-summary"></div>
+      <div id="rec-results"></div>
+      <div id="rec-detail" class="detail-panel hidden"></div>
     </section>
 
     <section id="tab-models" class="tab-content">
@@ -282,6 +308,30 @@
         <h3>Memory Report</h3>
         <p class="placeholder">Loading report...</p>
       </div>
+    </section>
+
+    <section id="tab-recommend" class="tab-content">
+      <h2>Model Recommendations</h2>
+      <div class="controls">
+        <label>Hardware
+          <select id="rec-hw-select"><option value="">Loading…</option></select>
+        </label>
+        <button class="btn btn-secondary" id="rec-detect-hw-btn" aria-label="Detect my Mac hardware automatically">Detect My Mac</button>
+        <span id="rec-detect-hw-feedback" class="detect-feedback" aria-live="polite"></span>
+        <label>Use Case
+          <select id="rec-usecase-select">
+            <option value="general">General</option>
+            <option value="coding">Coding</option>
+            <option value="reasoning">Reasoning</option>
+            <option value="small">Small Models (≤8B)</option>
+            <option value="large-context">Large Context (≥64K)</option>
+          </select>
+        </label>
+        <button class="btn" id="rec-analyze-btn" disabled>Get Recommendations</button>
+      </div>
+      <div id="rec-summary"></div>
+      <div id="rec-results"></div>
+      <div id="rec-detail" class="detail-panel hidden"></div>
     </section>
   </main>
 
