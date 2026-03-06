@@ -420,7 +420,7 @@ def get_llama_cpp_command(
     if template.system_prompt:
         parts.append(f'--system-prompt "{template.system_prompt}"')
     parts.extend(template.llama_cpp_flags)
-    parts.extend(["-fa", "--jinja", "--color"])
+    parts.extend(["-fa on", "--jinja", "--color on"])
     return " \\\n  ".join(parts)
 
 
@@ -439,7 +439,7 @@ def get_llama_cpp_server_command(
         f"--port {port}",
         f"-c {ctx}",
         f"-ngl {n_gpu_layers}",
-        "-fa",
+        "-fa on",
     ]
     parts.extend(template.llama_cpp_flags)
     return " \\\n  ".join(parts)
