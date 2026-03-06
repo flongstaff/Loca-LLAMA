@@ -26,9 +26,29 @@ class HardwareListResponse(BaseModel):
     count: int
 
 
+class HardwareDetectResponse(BaseModel):
+    detected: bool
+    name: str | None = None
+    chip: str | None = None
+    memory_gb: int | None = None
+    reason: str | None = None
+
+
 # ── Models ───────────────────────────────────────────────────────────────────
 
 class ModelResponse(BaseModel):
+    name: str
+    family: str
+    params_billion: float
+    default_context_length: int
+    max_context_length: int
+    num_layers: int
+    num_kv_heads: int
+    head_dim: int
+    license: str
+
+
+class ModelDetailResponse(BaseModel):
     name: str
     family: str
     params_billion: float

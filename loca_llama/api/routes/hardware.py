@@ -6,8 +6,8 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
-from loca_llama.api.schemas import HardwareListResponse, HardwareResponse
-from loca_llama.hardware import APPLE_SILICON_SPECS
+from loca_llama.api.schemas import HardwareDetectResponse, HardwareListResponse, HardwareResponse
+from loca_llama.hardware import APPLE_SILICON_SPECS, detect_mac
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,31 @@ async def list_hardware() -> HardwareListResponse:
     except Exception as e:
         logger.error("Failed to list hardware: %s", e)
         raise HTTPException(status_code=500, detail="Failed to list hardware")
+
+
+@router.get("/detect", response_model=HardwareDetectResponse)
+async def detect_hardware() -> HardwareDetectResponse:
+    """Auto-detect the current Mac's Apple Silicon hardware."""
+    try:
+        result = detect_mac()
+        if result is None:
+            return HardwareDetectResponse(
+                detected=False,
+                reason="Could not detect Apple Silicon hardware. This feature requires a Mac with Apple Silicon.",
+            )
+        name, spec = result
+        return HardwareDetectResponse(
+            detected=True,
+            name=name,
+            chip=spec.chip,
+            memory_gb=spec.memory_gb,
+        )
+    except Exception as e:
+        logger.error("Hardware detection failed: %s", e)
+        return HardwareDetectResponse(
+            detected=False,
+            reason="Hardware detection encountered an error.",
+        )
 
 
 @router.get("/{name}", response_model=HardwareResponse)

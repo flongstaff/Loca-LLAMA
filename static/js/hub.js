@@ -13,7 +13,7 @@ async function searchHub() {
   const filesDiv = document.getElementById("hub-files");
 
   resultsDiv.innerHTML = '<p class="loading">Searching…</p>';
-  filesDiv.style.display = "none";
+  filesDiv.classList.add("hidden");
 
   try {
     let url = `/hub/search?query=${encodeURIComponent(query)}&sort=${sort}&limit=30`;
@@ -27,7 +27,7 @@ async function searchHub() {
 
     const rows = data.results
       .map(
-        (m) => `<tr data-repo="${escapeHtml(m.repo_id)}" style="cursor:pointer">
+        (m) => `<tr data-repo="${escapeHtml(m.repo_id)}" class="cursor-pointer">
           <td>${escapeHtml(m.repo_id)}</td>
           <td class="num">${formatDownloads(m.downloads)}</td>
           <td class="num">${m.likes}</td>
@@ -38,7 +38,7 @@ async function searchHub() {
       .join("");
 
     resultsDiv.innerHTML = `
-      <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:0.5rem;">
+      <p class="text-muted text-sm mb-2">
         ${data.count} results for "${escapeHtml(query)}"
       </p>
       <table>
@@ -59,7 +59,7 @@ async function searchHub() {
 
 async function showRepoFiles(repoId) {
   const filesDiv = document.getElementById("hub-files");
-  filesDiv.style.display = "block";
+  filesDiv.classList.remove("hidden");
   filesDiv.innerHTML = `<h3>${escapeHtml(repoId)}</h3><p class="loading">Loading files…</p>`;
 
   try {
@@ -80,7 +80,7 @@ async function showRepoFiles(repoId) {
       .join("");
 
     filesDiv.innerHTML = `
-      <h3>${escapeHtml(repoId)} <span style="color:var(--text-muted);font-size:0.85rem">(${data.files.length} files)</span></h3>
+      <h3>${escapeHtml(repoId)} <span class="text-muted text-sm">(${data.files.length} files)</span></h3>
       <table>
         <thead><tr><th>Filename</th><th>Size</th></tr></thead>
         <tbody>${rows}</tbody>

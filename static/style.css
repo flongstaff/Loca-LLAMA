@@ -259,6 +259,7 @@ tr:hover td {
   border-radius: var(--radius);
   padding: var(--space-5);
   margin-bottom: var(--space-3);
+  box-shadow: var(--shadow-sm);
 }
 
 /* ── Badges ─────────────────────────────────────────────────────────── */
@@ -313,6 +314,7 @@ select, input, button.btn {
 select:focus, input:focus {
   outline: none;
   border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-subtle);
 }
 
 button.btn {
@@ -328,9 +330,24 @@ button.btn:hover {
   background: var(--accent-hover);
 }
 
+button.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 button.btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+}
+.btn-ghost:hover {
+  color: var(--text);
+  background: var(--bg-hover);
 }
 
 /* ── Checkbox Labels ────────────────────────────────────────────────── */
@@ -414,6 +431,7 @@ th.sort-desc::after {
   border-radius: var(--radius);
   padding: var(--space-5);
   margin-top: var(--space-4);
+  box-shadow: var(--shadow);
 }
 
 .detail-panel h3 {
@@ -735,6 +753,8 @@ button.btn-export:hover {
 .mt-4 { margin-top: var(--space-4); }
 .mb-2 { margin-bottom: var(--space-2); }
 .mb-3 { margin-bottom: var(--space-3); }
+.mb-4 { margin-bottom: var(--space-4); }
+.mt-0 { margin-top: 0; }
 
 .w-full { width: 100%; }
 .cursor-pointer { cursor: pointer; }
@@ -759,8 +779,51 @@ button.btn-export:hover {
   border-radius: var(--radius);
 }
 
+.detail-panel.detail-panel--visible {
+  display: block;
+}
+
+.resize-v { resize: vertical; }
+
 .input-narrow { width: 60px; }
 .input-wide { min-width: 250px; }
+
+/* ── Detect Hardware Feedback ───────────────────────────────────────── */
+
+.detect-feedback {
+  font-size: var(--text-sm);
+  padding: 0 var(--space-2);
+  align-self: center;
+}
+
+.detect-success {
+  color: var(--tier-full-gpu);
+}
+
+.detect-muted {
+  color: var(--text-muted);
+}
+
+/* ── Clickable Table Rows ──────────────────────────────────────────── */
+
+tr.clickable-row {
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+tr.clickable-row:hover {
+  background: var(--bg-hover);
+}
+
+tr.clickable-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+tr.clickable-row.active-row {
+  background: var(--accent-muted, rgba(99, 102, 241, 0.12));
+  border-left: 3px solid var(--accent);
+}
 
 /* ── Responsive ─────────────────────────────────────────────────────── */
 
