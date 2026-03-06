@@ -10,6 +10,7 @@ let sweepJobId = null;
 let sweepPollTimer = null;
 let lastBenchResult = null;
 let lastSweepResult = null;
+let lastSweepAggregates = null;
 
 async function detectRuntimes() {
   const btn = document.getElementById("detect-runtimes-btn");
@@ -541,6 +542,7 @@ function renderSweepStatus(data) {
     </div>`;
 
   lastSweepResult = data;
+  lastSweepAggregates = aggregates;
 
   // Draw sweep bar chart comparing tok/s across models
   if (aggregates.length > 0) {
@@ -572,6 +574,30 @@ function exportJson(data, prefix) {
   URL.revokeObjectURL(url);
 }
 
+function reRenderBenchCharts() {
+  // Re-render bench line chart
+  if (lastBenchResult && lastBenchResult.runs && lastBenchResult.runs.length > 1) {
+    const chartData = lastBenchResult.runs
+      .filter((r) => r.success)
+      .map((r) => ({ label: `#${r.run_number}`, value: r.tokens_per_second }));
+    const canvas = document.getElementById("bench-runs-chart");
+    if (canvas && chartData.length > 1) {
+      drawLineChart(canvas, chartData, { title: "tok/s per Run", unit: "", height: 180, showDots: true });
+    }
+  }
+  // Re-render sweep bar chart
+  if (lastSweepAggregates && lastSweepAggregates.length > 0) {
+    const chartData = lastSweepAggregates.map((a) => ({
+      label: a.model_id.split("/").pop(),
+      value: a.avg_tok_per_sec,
+    }));
+    const canvas = document.getElementById("bench-sweep-chart");
+    if (canvas) {
+      drawBarChart(canvas, chartData, { title: "Avg tok/s by Model", unit: "", height: 250 });
+    }
+  }
+}
+
 export function initBenchmark() {
   document.getElementById("detect-runtimes-btn").addEventListener("click", detectRuntimes);
   document.getElementById("bench-runtime-select").addEventListener("change", onRuntimeChange);
@@ -580,4 +606,6 @@ export function initBenchmark() {
   document.getElementById("bench-prompt-select").addEventListener("change", onPromptTypeChange);
   document.getElementById("bench-sweep-toggle").addEventListener("change", onSweepToggle);
   document.getElementById("bench-sweep-start-btn").addEventListener("click", startSweep);
+
+  document.addEventListener("themechange", reRenderBenchCharts);
 }

@@ -202,6 +202,9 @@ export function initCalculator() {
   // KV bits select
   document.getElementById("calc-kv-bits").addEventListener("change", scheduleEstimate);
 
+  // Re-render chart on theme change
+  document.addEventListener("themechange", () => scheduleEstimate());
+
   // Run initial estimate with default values
   runEstimate();
 }

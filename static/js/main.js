@@ -1,3 +1,4 @@
+import { initTheme } from "./theme.js";
 import { initTabs } from "./tabs.js";
 import { initCompat } from "./compat.js";
 import { initModels } from "./models.js";
@@ -10,6 +11,7 @@ import { initCalculator } from "./calculator.js";
 document.addEventListener("DOMContentLoaded", () => {
   console.log("Loca-LLAMA webapp loaded");
 
+  initTheme();
   initTabs();
   initCompat();
   initModels();
