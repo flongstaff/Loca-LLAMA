@@ -6,7 +6,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Query
 
-from loca_llama.api.schemas import ModelListResponse, ModelResponse
+from loca_llama.api.schemas import ModelDetailResponse, ModelListResponse, ModelResponse
 from loca_llama.models import MODELS
 
 logger = logging.getLogger(__name__)
@@ -41,3 +41,29 @@ async def list_models(family: str | None = Query(None, description="Filter by mo
     except Exception as e:
         logger.error("Failed to list models: %s", e)
         raise HTTPException(status_code=500, detail="Failed to list models")
+
+
+@router.get("/{name}", response_model=ModelDetailResponse)
+async def get_model_detail(name: str) -> ModelDetailResponse:
+    """Return full details for a single model by name."""
+    try:
+        model = next((m for m in MODELS if m.name == name), None)
+        if model is None:
+            raise HTTPException(status_code=404, detail="Model not found")
+        return ModelDetailResponse(
+            name=model.name,
+            family=model.family,
+            params_billion=model.params_billion,
+            default_context_length=model.default_context_length,
+            max_context_length=model.max_context_length,
+            num_layers=model.num_layers,
+            num_kv_heads=model.num_kv_heads,
+            head_dim=model.head_dim,
+            license=model.license,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to get model '%s': %s", name, e)
+        raise HTTPException(status_code=500, detail="Failed to get model details")
+

@@ -57,6 +57,8 @@
         <label>Hardware
           <select id="hw-select"><option value="">Loading…</option></select>
         </label>
+        <button class="btn btn-secondary" id="detect-hw-btn" aria-label="Detect my Mac hardware automatically">Detect My Mac</button>
+        <span id="detect-hw-feedback" class="detect-feedback" aria-live="polite"></span>
         <label>Quantization
           <select id="quant-select"><option value="">Loading…</option></select>
         </label>
@@ -81,6 +83,7 @@
         </label>
       </div>
       <div id="models-table"></div>
+      <div id="model-detail" class="detail-panel hidden" aria-live="polite"></div>
     </section>
 
     <section id="tab-local" class="tab-content">
@@ -148,7 +151,7 @@
         <button class="btn" id="bench-stream-btn" disabled>Stream</button>
       </div>
       <div id="bench-custom-prompt" class="hidden mt-2">
-        <textarea id="bench-custom-prompt-text" rows="3" placeholder="Enter your custom prompt…" class="w-full" style="resize:vertical;"></textarea>
+        <textarea id="bench-custom-prompt-text" rows="3" placeholder="Enter your custom prompt…" class="w-full resize-v"></textarea>
       </div>
 
       <div class="sweep-section" id="bench-sweep-section">
@@ -158,7 +161,7 @@
           </label>
         </div>
         <div id="bench-sweep-controls" class="hidden">
-          <p class="text-muted mb-2" style="margin-top:0;">Select models to include in sweep:</p>
+          <p class="text-muted mb-2 mt-0">Select models to include in sweep:</p>
           <div id="bench-sweep-model-list" class="sweep-model-list">
             <p class="placeholder">Detect runtimes and select one first.</p>
           </div>
@@ -168,7 +171,7 @@
 
       <div id="bench-status"></div>
       <div id="bench-stream-output" class="hidden">
-        <div class="detail-panel" style="display:block;margin-bottom:1rem;">
+        <div class="detail-panel detail-panel--visible mb-4">
           <div class="detail-grid" id="bench-stream-metrics">
             <div class="detail-item"><span class="label">Tokens</span><span class="value" id="stream-token-count">0</span></div>
             <div class="detail-item"><span class="label">tok/s</span><span class="value" id="stream-tok-sec">—</span></div>

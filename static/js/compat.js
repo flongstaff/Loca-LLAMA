@@ -81,7 +81,7 @@ async function runAnalysis() {
 
   resultsDiv.innerHTML = '<p class="loading">Analyzing…</p>';
   summaryDiv.innerHTML = "";
-  detailDiv.style.display = "none";
+  detailDiv.classList.add("hidden");
 
   try {
     const data = await api.post("/analyze/all", {
@@ -112,7 +112,7 @@ function renderTierSummary(summary, count) {
 
   div.innerHTML = `
     <div class="tier-summary">
-      <span style="color:var(--text-muted)">${count} results:</span>
+      <span class="text-muted">${count} results:</span>
       ${tiers
         .filter((t) => summary[t.key] > 0)
         .map(
@@ -168,7 +168,7 @@ function renderCompatTable() {
 
   const rows = sorted
     .map(
-      (r) => `<tr data-model="${escapeHtml(r.model_name)}" style="cursor:pointer">
+      (r) => `<tr data-model="${escapeHtml(r.model_name)}" class="cursor-pointer">
         <td>${escapeHtml(r.model_name)}</td>
         <td class="num">${r.total_memory_gb.toFixed(1)}</td>
         <td class="num">${r.headroom_gb.toFixed(1)}</td>
@@ -223,7 +223,7 @@ async function showDetail(modelName) {
     /* ignore */
   }
 
-  detail.style.display = "block";
+  detail.classList.remove("hidden");
   detail.innerHTML = `
     <h3>${escapeHtml(result.model_name)} <span class="badge ${tierToCssClass(result.tier)}">${escapeHtml(result.tier_label)}</span></h3>
     <div class="detail-grid">
@@ -244,6 +244,11 @@ async function showDetail(modelName) {
 
 export function initCompat() {
   loadCompatibilityDropdowns();
+
+  const hwSelect = document.getElementById("hw-select");
+  const detectBtn = document.getElementById("detect-hw-btn");
+  const feedbackEl = document.getElementById("detect-hw-feedback");
+  detectBtn.addEventListener("click", () => detectHardware(hwSelect, detectBtn, feedbackEl));
 
   document.getElementById("only-fits-check").addEventListener("change", () => {
     if (compatResults.length > 0) runAnalysis();
