@@ -3,7 +3,7 @@
 import argparse
 import sys
 
-from .hardware import APPLE_SILICON_SPECS, MacSpec
+from .hardware import APPLE_SILICON_SPECS, MacSpec, detect_mac
 from .models import MODELS, LLMModel
 from .quantization import QUANT_FORMATS, RECOMMENDED_FORMATS
 from .analyzer import analyze_model, analyze_all, max_context_for_model
@@ -182,7 +182,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ── check ──
     check = sub.add_parser("check", help="Check which models fit your Mac")
-    check.add_argument("--hw", required=True, help="Hardware config (e.g. 'M4 Pro 48GB')")
+    check.add_argument("--hw", default=None, help="Hardware config (e.g. 'M4 Pro 48GB'). Auto-detected if omitted.")
     check.add_argument("--model", help="Filter to a specific model name (substring match)")
     check.add_argument("--family", help="Filter by model family (e.g. Llama, Qwen)")
     check.add_argument("--quant", nargs="+", help="Quantization formats to check (default: recommended)")
@@ -191,20 +191,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ── detail ──
     detail = sub.add_parser("detail", help="Detailed analysis of a specific model")
-    detail.add_argument("--hw", required=True, help="Hardware config (e.g. 'M4 Pro 48GB')")
+    detail.add_argument("--hw", default=None, help="Hardware config (e.g. 'M4 Pro 48GB'). Auto-detected if omitted.")
     detail.add_argument("--model", required=True, help="Model name (exact or substring)")
     detail.add_argument("--quant", default="Q4_K_M", help="Quantization format (default: Q4_K_M)")
     detail.add_argument("--context", type=int, help="Context length")
 
     # ── max-context ──
     mc = sub.add_parser("max-context", help="Find max context length for a model")
-    mc.add_argument("--hw", required=True, help="Hardware config")
+    mc.add_argument("--hw", default=None, help="Hardware config. Auto-detected if omitted.")
     mc.add_argument("--model", required=True, help="Model name")
     mc.add_argument("--quant", default="Q4_K_M", help="Quantization format (default: Q4_K_M)")
 
     # ── recommend ──
     rec = sub.add_parser("recommend", help="Get recommendations for your hardware")
-    rec.add_argument("--hw", required=True, help="Hardware config")
+    rec.add_argument("--hw", default=None, help="Hardware config. Auto-detected if omitted.")
     rec.add_argument("--use-case", choices=["general", "coding", "reasoning", "small", "large-context"],
                      default="general", help="Intended use case")
 
@@ -237,6 +237,20 @@ def resolve_hw(hw_name: str) -> MacSpec | None:
         return None
     print(f"{RED}Unknown hardware: '{hw_name}'. Use 'list-hw' to see options.{RESET}")
     return None
+
+
+def resolve_hw_or_detect(hw_name: str | None) -> MacSpec | None:
+    """Resolve hardware by name, or auto-detect on the current Mac."""
+    if hw_name:
+        return resolve_hw(hw_name)
+    result = detect_mac()
+    if result is None:
+        print(f"{RED}Could not detect hardware. Use --hw to specify manually.{RESET}")
+        print(f"{DIM}Run 'loca-llama list-hw' for options.{RESET}")
+        return None
+    key, mac = result
+    print(f"{GREEN}Detected: {key}{RESET}", file=sys.stderr)
+    return mac
 
 
 def resolve_model(name: str) -> LLMModel | None:
@@ -296,7 +310,7 @@ def cmd_list_quants() -> None:
 
 
 def cmd_check(args) -> None:
-    mac = resolve_hw(args.hw)
+    mac = resolve_hw_or_detect(args.hw)
     if not mac:
         sys.exit(1)
 
@@ -313,7 +327,8 @@ def cmd_check(args) -> None:
     # Sort: fits first, then by total memory
     results.sort(key=lambda r: (not r.fits_in_memory, r.total_memory_gb))
 
-    print_header(f"LLM Compatibility — {args.hw}")
+    hw_label = args.hw or f"{mac.chip} {mac.memory_gb}GB"
+    print_header(f"LLM Compatibility — {hw_label}")
     print_hw_summary(mac)
 
     if not results:
@@ -329,7 +344,7 @@ def cmd_check(args) -> None:
 
 
 def cmd_detail(args) -> None:
-    mac = resolve_hw(args.hw)
+    mac = resolve_hw_or_detect(args.hw)
     if not mac:
         sys.exit(1)
     model = resolve_model(args.model)
@@ -348,7 +363,7 @@ def cmd_detail(args) -> None:
 
 
 def cmd_max_context(args) -> None:
-    mac = resolve_hw(args.hw)
+    mac = resolve_hw_or_detect(args.hw)
     if not mac:
         sys.exit(1)
     model = resolve_model(args.model)
@@ -391,7 +406,7 @@ def cmd_max_context(args) -> None:
 
 
 def cmd_recommend(args) -> None:
-    mac = resolve_hw(args.hw)
+    mac = resolve_hw_or_detect(args.hw)
     if not mac:
         sys.exit(1)
 
@@ -410,7 +425,8 @@ def cmd_recommend(args) -> None:
     else:
         models = list(MODELS)
 
-    print_header(f"Recommendations — {args.hw} ({use_case})")
+    hw_label = args.hw or f"{mac.chip} {mac.memory_gb}GB"
+    print_header(f"Recommendations — {hw_label} ({use_case})")
     print_hw_summary(mac)
 
     # Find best configs: prioritize quality (higher quant) that still fits well
@@ -439,14 +455,39 @@ def cmd_recommend(args) -> None:
     top = recommendations[:8]
     print(f"  {BOLD}Top picks (best quality quant that fits comfortably):{RESET}\n")
 
+    # Column widths
+    name_w = max(len(r.model.name) for r in top) + 1
+    quant_w = 8
+    rate_w = 14
+    bar_w = 36
+    mem_w = 20
+    tok_w = 14
+    ctx_w = 8
+
+    header = (
+        f"  {BOLD}{'#':>2}  {'Model':<{name_w}} {'Quant':<{quant_w}} "
+        f"{'Rating':<{rate_w}} {'Memory Usage':<{bar_w}} "
+        f"{'Mem':>{mem_w}} {'Speed':>{tok_w}} {'Max Ctx':>{ctx_w}}{RESET}"
+    )
+    print(header)
+    sep_len = 2 + 2 + name_w + quant_w + rate_w + bar_w + mem_w + tok_w + ctx_w + 6
+    print(f"  {'─' * sep_len}")
+
     for i, r in enumerate(top, 1):
-        prefix = f"  {MAGENTA}{i}.{RESET} "
-        print(f"{prefix}{BOLD}{r.model.name}{RESET} @ {CYAN}{r.quant.name}{RESET}")
-        print(f"     Memory: {format_size(r.total_memory_gb)} / {format_size(r.available_memory_gb)} "
-              f"({r.memory_utilization_pct:.0f}%)  |  "
-              f"Speed: {format_tok_s(r.estimated_tok_per_sec)}  |  "
-              f"Max ctx: {format_context(max_context_for_model(mac, r.model, r.quant))}")
-        print()
+        mem_bar = bar(r.total_memory_gb, r.available_memory_gb)
+        rating = color_rating(r.rating)
+        tok = format_tok_s(r.estimated_tok_per_sec)
+        mem_frac = f"{format_size(r.total_memory_gb)}/{format_size(r.available_memory_gb)}"
+        max_ctx = format_context(max_context_for_model(mac, r.model, r.quant))
+
+        print(
+            f"  {MAGENTA}{i:>2}{RESET}  {BOLD}{r.model.name:<{name_w}}{RESET} "
+            f"{CYAN}{r.quant.name:<{quant_w}}{RESET} "
+            f"{rating:<{rate_w}} {mem_bar} "
+            f"{mem_frac:>{mem_w}} {tok:>{tok_w}} {max_ctx:>{ctx_w}}"
+        )
+
+    print(f"\n  {GREEN}{len(top)}{RESET} recommendations shown")
 
 
 def cmd_scan(args) -> None:
