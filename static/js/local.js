@@ -23,7 +23,7 @@ async function scanLocalModels(customDir) {
 
     summaryDiv.innerHTML = `
       <div class="tier-summary">
-        <span style="color:var(--text-muted)">${data.count} models (${formatSizeGb(data.total_size_gb)} total):</span>
+        <span class="text-muted">${data.count} models (${formatSizeGb(data.total_size_gb)} total):</span>
         ${sourceEntries}
       </div>`;
 

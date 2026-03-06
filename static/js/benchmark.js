@@ -39,7 +39,7 @@ async function detectRuntimes() {
       runtimeSelect.appendChild(opt);
     });
     runtimeSelect.disabled = false;
-    statusDiv.innerHTML = `<p style="color:var(--text-muted)">${data.count} runtime${data.count !== 1 ? "s" : ""} detected.</p>`;
+    statusDiv.innerHTML = `<p class="text-muted">${data.count} runtime${data.count !== 1 ? "s" : ""} detected.</p>`;
   } catch (err) {
     statusDiv.innerHTML = `<p class="error-message">${escapeHtml(err.message)}</p>`;
   } finally {
@@ -173,7 +173,7 @@ function renderBenchmarkStatus(data) {
   }
 
   // Complete
-  statusDiv.innerHTML = '<p style="color:var(--accent)">Benchmark complete.</p>';
+  statusDiv.innerHTML = '<p class="text-accent">Benchmark complete.</p>';
 
   let html = "";
 
@@ -181,7 +181,7 @@ function renderBenchmarkStatus(data) {
   if (data.aggregate) {
     const a = data.aggregate;
     html += `
-      <div class="detail-panel" style="display:block;margin-bottom:1rem;">
+      <div class="detail-panel detail-panel--visible mb-4">
         <h3>Summary (${a.runs} run${a.runs !== 1 ? "s" : ""}, warmup skipped)</h3>
         <div class="detail-grid">
           <div class="detail-item"><span class="label">Avg tok/s</span><span class="value">${a.avg_tok_per_sec}</span></div>
@@ -223,11 +223,11 @@ function renderBenchmarkStatus(data) {
   }
 
   // Export button
-  html += `<button class="btn btn-export" id="bench-export-btn" style="margin-top:0.75rem;">Export JSON</button>`;
+  html += `<button class="btn btn-export mt-3" id="bench-export-btn">Export JSON</button>`;
 
   // Per-run chart canvas
   if (data.runs && data.runs.length > 1) {
-    html += `<div class="chart-container" style="margin-top:1rem;"><canvas id="bench-runs-chart"></canvas></div>`;
+    html += `<div class="chart-container mt-4"><canvas id="bench-runs-chart"></canvas></div>`;
   }
 
   resultsDiv.innerHTML = html;
@@ -251,7 +251,7 @@ function renderBenchmarkStatus(data) {
 function onPromptTypeChange() {
   const promptType = document.getElementById("bench-prompt-select").value;
   const customDiv = document.getElementById("bench-custom-prompt");
-  customDiv.style.display = promptType === "custom" ? "block" : "none";
+  customDiv.classList.toggle("hidden", promptType !== "custom");
 }
 
 function startStream() {
@@ -273,7 +273,7 @@ function startStream() {
   document.getElementById("stream-tok-sec").textContent = "—";
   document.getElementById("stream-ttft").textContent = "—";
   document.getElementById("stream-elapsed").textContent = "—";
-  streamOutput.style.display = "block";
+  streamOutput.classList.remove("hidden");
   document.getElementById("bench-results").innerHTML = "";
 
   streamBtn.disabled = true;
@@ -321,7 +321,7 @@ function startStream() {
     document.getElementById("stream-ttft").textContent = `${data.ttft_ms} ms`;
     document.getElementById("stream-elapsed").textContent = `${(data.elapsed_ms / 1000).toFixed(1)}s`;
     document.getElementById("stream-token-count").textContent = data.tokens;
-    statusDiv.innerHTML = '<p style="color:var(--accent)">Stream complete.</p>';
+    statusDiv.innerHTML = '<p class="text-accent">Stream complete.</p>';
     cleanupStream();
   });
 
@@ -354,7 +354,7 @@ function cleanupStream() {
 
 function onSweepToggle() {
   const checked = document.getElementById("bench-sweep-toggle").checked;
-  document.getElementById("bench-sweep-controls").style.display = checked ? "block" : "none";
+  document.getElementById("bench-sweep-controls").classList.toggle("hidden", !checked);
 }
 
 function populateSweepModels(models) {
@@ -483,7 +483,7 @@ function renderSweepStatus(data) {
   }
 
   // Complete — render comparison table
-  statusDiv.innerHTML = '<p style="color:var(--accent)">Sweep complete.</p>';
+  statusDiv.innerHTML = '<p class="text-accent">Sweep complete.</p>';
 
   if (!data.combo_results || data.combo_results.length === 0) {
     sweepResults.innerHTML = '<p class="placeholder">No results.</p>';
@@ -509,7 +509,7 @@ function renderSweepStatus(data) {
     .map((cr) => {
       const a = cr.aggregate;
       if (!a || a.runs === 0) {
-        return `<tr><td>${escapeHtml(cr.model_id)}</td><td colspan="6" style="color:var(--danger)">Failed</td></tr>`;
+        return `<tr><td>${escapeHtml(cr.model_id)}</td><td colspan="6" class="text-danger">Failed</td></tr>`;
       }
       const cls = (val, best, lower) => {
         const isBest = lower ? val <= best : val >= best;
@@ -537,8 +537,8 @@ function renderSweepStatus(data) {
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
-      <button class="btn btn-export" id="sweep-export-btn" style="margin-top:0.75rem;">Export JSON</button>
-      <div class="chart-container" style="margin-top:1rem;"><canvas id="bench-sweep-chart"></canvas></div>
+      <button class="btn btn-export mt-3" id="sweep-export-btn">Export JSON</button>
+      <div class="chart-container mt-4"><canvas id="bench-sweep-chart"></canvas></div>
     </div>`;
 
   lastSweepResult = data;
