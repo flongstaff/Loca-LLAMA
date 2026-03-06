@@ -22,9 +22,43 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
+[project.optional-dependencies]
+web = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.28",
+    "coverage>=7.0",
+]
+
 [project.scripts]
 loca-llama = "loca_llama.cli:main"
 loca-llama-ui = "loca_llama.interactive:main_interactive"
+loca-llama-web = "loca_llama.api.app:serve"
 
 [tool.setuptools.packages.find]
 include = ["loca_llama*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short -x"
+
+[tool.coverage.run]
+source = ["loca_llama"]
+omit = [
+    "loca_llama/cli.py",
+    "loca_llama/interactive.py",
+    "loca_llama/__main__.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__",
+]

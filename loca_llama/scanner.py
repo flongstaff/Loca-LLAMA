@@ -193,12 +193,46 @@ def scan_mlx_models(directory: Path) -> list[LocalModel]:
     return models
 
 
+def scan_lmstudio_mlx(directory: Path) -> list[LocalModel]:
+    """Scan LM Studio directory for MLX/safetensors models.
+
+    LM Studio stores MLX models in flat directories:
+    models/<org>/<model-name>/*.safetensors
+    """
+    models: list[LocalModel] = []
+    if not directory.exists():
+        return models
+
+    for org_dir in directory.iterdir():
+        if not org_dir.is_dir():
+            continue
+        for model_dir in org_dir.iterdir():
+            if not model_dir.is_dir():
+                continue
+            if not any(model_dir.glob("*.safetensors")):
+                continue
+            is_mlx = "mlx" in org_dir.name.lower() or "mlx" in model_dir.name.lower()
+            models.append(LocalModel(
+                name=model_dir.name,
+                path=model_dir,
+                size_gb=dir_size_gb(model_dir),
+                format="mlx" if is_mlx else "safetensors",
+                source="lm-studio",
+                quant=detect_quant(model_dir.name),
+                family=detect_family(model_dir.name),
+                repo_id=f"{org_dir.name}/{model_dir.name}",
+            ))
+
+    return models
+
+
 def scan_all() -> list[LocalModel]:
     """Scan all known locations for downloaded models."""
     all_models: list[LocalModel] = []
 
     for path in LM_STUDIO_PATHS:
         all_models.extend(scan_gguf_files(path, "lm-studio"))
+        all_models.extend(scan_lmstudio_mlx(path))
 
     for path in LLAMA_CPP_PATHS:
         all_models.extend(scan_gguf_files(path, "llama.cpp"))

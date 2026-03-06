@@ -254,6 +254,19 @@ class MemoryMonitor:
             return self._samples[-1]
         return None
 
+    def get_history(self, limit: int = 60) -> list[MemorySample]:
+        """Return recent samples as a thread-safe snapshot."""
+        return list(self._samples[-limit:])
+
+    def get_report(self) -> MemoryReport:
+        """Return aggregate memory report since monitor start."""
+        return self._build_report()
+
+    @property
+    def start_time(self) -> float:
+        """Monotonic start time for wall-clock timestamp conversion."""
+        return self._start_time
+
     def _monitor_loop(self) -> None:
         while self._running:
             time.sleep(self.interval)

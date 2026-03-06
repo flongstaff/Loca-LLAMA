@@ -2,7 +2,7 @@
 
 import sys
 
-from .hardware import APPLE_SILICON_SPECS, MacSpec
+from .hardware import APPLE_SILICON_SPECS, MacSpec, detect_mac
 from .models import MODELS
 from .quantization import QUANT_FORMATS, RECOMMENDED_FORMATS
 from .analyzer import (
@@ -19,7 +19,7 @@ from .benchmark import (
     run_benchmark_suite, aggregate_results,
     benchmark_llama_cpp_native, BENCH_PROMPTS,
 )
-from .templates import get_template, get_lm_studio_preset, get_llama_cpp_command, get_llama_cpp_server_command
+from .templates import get_template, get_lm_studio_preset, get_llama_cpp_command, get_llama_cpp_server_command, detect_model_format_warning
 from .memory_monitor import (
     MemoryMonitor, MemoryReport, get_memory_sample,
     memory_bar, format_memory_report, format_mini_memory_bar, pressure_badge,
@@ -189,6 +189,17 @@ def print_separator(title: str = "", char: str = "-", width: int = 65):
 # ── Hardware Selection ───────────────────────────────────────────────────────
 
 def select_hardware() -> MacSpec | None:
+    # Try auto-detect first
+    detected = detect_mac()
+    if detected:
+        key, mac = detected
+        print(f"\n  {GREEN}Detected:{RESET} {BOLD}{key}{RESET}")
+        print(f"    {mac.cpu_cores} CPU cores, {mac.gpu_cores} GPU cores, "
+              f"{mac.memory_gb} GB unified, {mac.memory_bandwidth_gbs:.0f} GB/s")
+        if prompt_yes_no("  Use detected config?", default=True):
+            return mac
+        print()
+
     print(f"\n  {BOLD}{CYAN}Select Your Mac Configuration{RESET}")
     print(f"  {DIM}Choose your Apple Silicon chip and memory{RESET}")
 
@@ -543,8 +554,21 @@ def _show_template(mac: MacSpec, m: LocalModel):
         print(f"    Min P:          {preset['inference_params']['min_p']}")
         print(f"    Repeat Penalty: {preset['inference_params']['repeat_penalty']}")
 
+        # Build sampling overrides from HF-merged values
+        sampling_overrides = {
+            "temperature": temp,
+            "top_p": top_p,
+            "top_k": top_k,
+            "repeat_penalty": rep_pen,
+            "min_p": tmpl.min_p,
+        }
+
+        format_warning = detect_model_format_warning(str(m.path))
+        if format_warning:
+            print(f"\n  {YELLOW}Warning: {format_warning}{RESET}")
+
         print(f"\n  {BOLD}{CYAN}llama.cpp Command:{RESET}")
-        cmd = get_llama_cpp_command(tmpl, str(m.path))
+        cmd = get_llama_cpp_command(tmpl, str(m.path), sampling_overrides=sampling_overrides)
         for line in cmd.split("\n"):
             print(f"    {GREEN}{line}{RESET}")
 
@@ -881,11 +905,18 @@ def _show_model_download(mac: MacSpec, model: HubModel):
 def screen_detail(mac: MacSpec):
     print(f"\n  {BOLD}{CYAN}Detailed Model Analysis{RESET}")
 
-    model_names = [f"{m.name} ({m.params_billion}B)" for m in MODELS]
+    families = sorted(set(m.family for m in MODELS))
+    family_options = ["All families"] + families
+    fidx = prompt_choice("Filter by model family:", family_options)
+    if fidx is None:
+        return
+    filtered = MODELS if fidx == 0 else [m for m in MODELS if m.family == families[fidx - 1]]
+
+    model_names = [f"{m.name} ({m.params_billion}B)" for m in filtered]
     idx = prompt_choice("Select model:", model_names)
     if idx is None:
         return
-    model = MODELS[idx]
+    model = filtered[idx]
 
     quant_options = [
         f"{q} -- {QUANT_FORMATS[q].bits_per_weight:.1f} bpw ({QUANT_FORMATS[q].quality_rating})"
@@ -1082,6 +1113,7 @@ def main_interactive():
         sys.exit(0)
 
     while True:
+        clear_screen()
         runtimes = detect_all_runtimes()
         rt_str = " | ".join(runtime_badge(r.name) for r in runtimes) if runtimes else f"{DIM}no runtimes detected{RESET}"
 

@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import time
 import urllib.request
+from collections.abc import Generator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -61,6 +62,12 @@ BENCH_PROMPTS = {
     "creative": (
         "Write a short story (3 paragraphs) about a robot who discovers it can dream. "
         "Use vivid imagery and emotional depth."
+    ),
+    "json": (
+        "Return a JSON object with exactly these keys: "
+        '"name" (string), "version" (string), "features" (array of 5 strings), '
+        '"config" (nested object with "debug": bool, "max_retries": int, "timeout_ms": int). '
+        "Output only valid JSON, no markdown fences."
     ),
 }
 
@@ -190,6 +197,61 @@ def benchmark_openai_api(
     )
 
 
+def benchmark_openai_api_streaming(
+    base_url: str,
+    model_id: str,
+    prompt: str = BENCH_PROMPTS["default"],
+    max_tokens: int = BENCH_MAX_TOKENS,
+    timeout: int = 120,
+) -> Generator[tuple[str, float], None, None]:
+    """Stream tokens from an OpenAI-compatible API, yielding (token_text, elapsed_ms).
+
+    Parses SSE lines in the format:
+        data: {"choices":[{"delta":{"content":"token"}}]}
+    Terminates on:
+        data: [DONE]
+    """
+    url = f"{base_url}/v1/chat/completions"
+    payload = json.dumps({
+        "model": model_id,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": max_tokens,
+        "temperature": 0.7,
+        "stream": True,
+    }).encode()
+
+    headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
+    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    start = time.perf_counter()
+
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        buf = b""
+        while True:
+            chunk = resp.read(1)
+            if not chunk:
+                break
+            buf += chunk
+            # Process complete lines
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                text = line.decode("utf-8", errors="replace").strip()
+                if not text or text.startswith(":"):
+                    continue
+                if text.startswith("data: "):
+                    data_str = text[6:]
+                    if data_str == "[DONE]":
+                        return
+                    try:
+                        obj = json.loads(data_str)
+                        delta = obj["choices"][0].get("delta", {})
+                        content = delta.get("content")
+                        if content:
+                            elapsed = (time.perf_counter() - start) * 1000
+                            yield (content, elapsed)
+                    except (json.JSONDecodeError, KeyError, IndexError):
+                        continue
+
+
 def benchmark_llama_cpp_native(
     model_path: str,
     prompt: str = BENCH_PROMPTS["default"],
@@ -266,9 +328,10 @@ def run_benchmark_suite(
     max_tokens: int = BENCH_MAX_TOKENS,
     context_length: int = 4096,
     progress_callback=None,
+    custom_prompt: str | None = None,
 ) -> list[BenchmarkResult]:
     """Run a multi-round benchmark. First run is warmup."""
-    prompt = BENCH_PROMPTS.get(prompt_type, BENCH_PROMPTS["default"])
+    prompt = custom_prompt if custom_prompt else BENCH_PROMPTS.get(prompt_type, BENCH_PROMPTS["default"])
     results = []
 
     for i in range(1, num_runs + 1):

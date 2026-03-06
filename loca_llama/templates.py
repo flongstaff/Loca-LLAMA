@@ -91,7 +91,7 @@ TEMPLATES: list[ModelTemplate] = [
             "You answer questions accurately and concisely."
         ),
         chat_template="llama3",
-        llama_cpp_flags=["--flash-attn"],
+        llama_cpp_flags=[],
         notes="Excellent all-rounder at 8B. Strong instruction following. Use flash attention for long context.",
         bench_tok_s_q4=50.0, bench_tok_s_q8=30.0, bench_prefill_q4=450.0,
     ),
@@ -106,7 +106,7 @@ TEMPLATES: list[ModelTemplate] = [
             "You provide detailed, well-reasoned answers."
         ),
         chat_template="llama3",
-        llama_cpp_flags=["--flash-attn"],
+        llama_cpp_flags=[],
         notes="Top-tier open model. On 48GB: Q4_K_M barely fits, limit context to 4-8K. Very slow generation.",
         bench_tok_s_q4=6.0, bench_tok_s_q8=None, bench_prefill_q4=40.0,
     ),
@@ -121,7 +121,7 @@ TEMPLATES: list[ModelTemplate] = [
             "You provide detailed, well-reasoned answers."
         ),
         chat_template="llama3",
-        llama_cpp_flags=["--flash-attn"],
+        llama_cpp_flags=[],
         notes="Latest Llama 70B. Improved over 3.1. Same memory constraints on 48GB.",
         bench_tok_s_q4=6.0, bench_tok_s_q8=None, bench_prefill_q4=40.0,
     ),
@@ -169,7 +169,7 @@ TEMPLATES: list[ModelTemplate] = [
         temperature=0.7, top_p=0.8, top_k=20, repeat_penalty=1.05, min_p=0.05,
         system_prompt="You are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
         chat_template="chatml",
-        llama_cpp_flags=["--flash-attn"],
+        llama_cpp_flags=[],
         notes="Near GPT-4 quality. On 48GB: Q3_K_L fits but slow (~8 tok/s). Worth it for quality.",
         bench_tok_s_q4=None, bench_tok_s_q8=None, bench_prefill_q4=None,
     ),
@@ -395,24 +395,32 @@ def get_llama_cpp_command(
     model_path: str,
     context_length: int | None = None,
     n_gpu_layers: int = -1,
+    sampling_overrides: dict[str, float | int] | None = None,
 ) -> str:
     """Generate the llama.cpp CLI command for this model."""
     ctx = context_length or template.recommended_ctx
+    overrides = sampling_overrides or {}
+    temp = overrides.get("temperature", template.temperature)
+    top_p = overrides.get("top_p", template.top_p)
+    top_k = overrides.get("top_k", template.top_k)
+    rep_pen = overrides.get("repeat_penalty", template.repeat_penalty)
+    min_p = overrides.get("min_p", template.min_p)
+
     parts = [
         "llama-cli",
         f"-m {model_path}",
         f"-c {ctx}",
         f"-ngl {n_gpu_layers}",
-        f"--temp {template.temperature}",
-        f"--top-p {template.top_p}",
-        f"--top-k {template.top_k}",
-        f"--repeat-penalty {template.repeat_penalty}",
-        f"--min-p {template.min_p}",
+        f"--temp {temp}",
+        f"--top-p {top_p}",
+        f"--top-k {top_k}",
+        f"--repeat-penalty {rep_pen}",
+        f"--min-p {min_p}",
     ]
     if template.system_prompt:
         parts.append(f'--system-prompt "{template.system_prompt}"')
     parts.extend(template.llama_cpp_flags)
-    parts.append("-i")  # interactive mode
+    parts.extend(["-fa", "--jinja", "--color"])
     return " \\\n  ".join(parts)
 
 
@@ -431,6 +439,19 @@ def get_llama_cpp_server_command(
         f"--port {port}",
         f"-c {ctx}",
         f"-ngl {n_gpu_layers}",
+        "-fa",
     ]
     parts.extend(template.llama_cpp_flags)
     return " \\\n  ".join(parts)
+
+
+def detect_model_format_warning(model_path: str) -> str | None:
+    """Return a warning string if the model path suggests a non-GGUF format."""
+    path_lower = model_path.lower()
+    if "mlx" in path_lower:
+        return "This model appears to be MLX format — llama-cli requires GGUF"
+    if path_lower.endswith(".safetensors"):
+        return "This model appears to be safetensors format — llama-cli requires GGUF"
+    if path_lower.endswith(".bin") and "pytorch" in path_lower:
+        return "This model appears to be PyTorch format — llama-cli requires GGUF"
+    return None
