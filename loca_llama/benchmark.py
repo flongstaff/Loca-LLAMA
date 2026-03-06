@@ -340,7 +340,8 @@ def benchmark_llama_cpp_native(
     cmd = [
         exe, "-m", model_path, "-p", prompt,
         "-n", str(max_tokens), "-c", str(context_length),
-        "-ngl", str(n_gpu_layers), "-fa", "on", "--log-disable",
+        "-ngl", str(n_gpu_layers), "-fa", "on",
+        "--no-conversation",
     ]
 
     start = time.perf_counter()
@@ -358,7 +359,10 @@ def benchmark_llama_cpp_native(
     eval_ms = 0.0
     prompt_tokens = 0
     gen_tokens = 0
+    tok_per_sec = 0.0
+    prompt_tok_per_sec = 0.0
 
+    # --- Old format: llama_print_timings (builds before ~b8000) ---
     m = re.search(r"prompt eval time\s*=\s*([\d.]+)\s*ms\s*/\s*(\d+)\s*tokens", output)
     if m:
         prompt_eval_ms = float(m.group(1))
@@ -369,8 +373,31 @@ def benchmark_llama_cpp_native(
         eval_ms = float(m.group(1))
         gen_tokens = int(m.group(2))
 
-    tok_per_sec = (gen_tokens / eval_ms * 1000) if eval_ms > 0 else 0
-    prompt_tok_per_sec = (prompt_tokens / prompt_eval_ms * 1000) if prompt_eval_ms > 0 else 0
+    # --- New format: [ Prompt: 132.3 t/s | Generation: 28.3 t/s ] (builds b8000+) ---
+    if gen_tokens == 0:
+        m_new = re.search(r"\[\s*Prompt:\s*([\d.]+)\s*t/s\s*\|\s*Generation:\s*([\d.]+)\s*t/s\s*\]", output)
+        if m_new:
+            prompt_tok_per_sec = float(m_new.group(1))
+            tok_per_sec = float(m_new.group(2))
+            # Estimate tokens from total time and rates
+            prompt_tokens = max(len(prompt) // 4, 1)
+            gen_tokens = max_tokens
+            if prompt_tok_per_sec > 0:
+                prompt_eval_ms = (prompt_tokens / prompt_tok_per_sec) * 1000
+            if tok_per_sec > 0:
+                eval_ms = (gen_tokens / tok_per_sec) * 1000
+
+    if tok_per_sec == 0 and eval_ms > 0:
+        tok_per_sec = (gen_tokens / eval_ms * 1000)
+    if prompt_tok_per_sec == 0 and prompt_eval_ms > 0:
+        prompt_tok_per_sec = (prompt_tokens / prompt_eval_ms * 1000)
+
+    parsed = gen_tokens > 0
+    error = None
+    if result.returncode != 0:
+        error = f"Exit code: {result.returncode}"
+    elif not parsed:
+        error = "Could not parse timing output from llama-cli"
 
     return BenchmarkResult(
         model_name=Path(model_path).stem,
@@ -383,9 +410,9 @@ def benchmark_llama_cpp_native(
         tokens_per_second=tok_per_sec,
         prompt_tokens_per_second=prompt_tok_per_sec,
         context_length=context_length,
-        success=result.returncode == 0 and gen_tokens > 0,
+        success=result.returncode == 0 and parsed,
         run_number=run_number,
-        error=None if result.returncode == 0 else f"Exit code: {result.returncode}",
+        error=error,
     )
 
 
