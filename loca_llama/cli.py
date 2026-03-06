@@ -6,7 +6,11 @@ import sys
 from .hardware import APPLE_SILICON_SPECS, MacSpec, detect_mac
 from .models import MODELS, LLMModel
 from .quantization import QUANT_FORMATS, RECOMMENDED_FORMATS
-from .analyzer import analyze_model, analyze_all, max_context_for_model
+from .analyzer import (
+    analyze_model, analyze_all, max_context_for_model,
+    estimate_model_size_gb, estimate_kv_cache_gb, estimate_kv_cache_raw,
+    estimate_overhead_gb,
+)
 
 
 # ── ANSI helpers ─────────────────────────────────────────────────────────────
@@ -207,6 +211,21 @@ def build_parser() -> argparse.ArgumentParser:
     rec.add_argument("--hw", default=None, help="Hardware config. Auto-detected if omitted.")
     rec.add_argument("--use-case", choices=["general", "coding", "reasoning", "small", "large-context"],
                      default="general", help="Intended use case")
+
+    # ── calc ──
+    calc = sub.add_parser("calc", help="Calculate VRAM requirements for a model")
+    calc.add_argument("--model", help="Model name (substring match)")
+    calc.add_argument("--quant", default="Q4_K_M", help="Quantization format (default: Q4_K_M)")
+    calc.add_argument("--params", type=float, help="Parameter count in billions (custom model)")
+    calc.add_argument("--bpw", type=float, help="Bits per weight (custom model)")
+    calc.add_argument("--context", type=int, default=4096, help="Context length (default: 4096)")
+    calc.add_argument("--layers", type=int, help="Number of layers (custom model)")
+    calc.add_argument("--kv-heads", type=int, help="Number of KV attention heads (custom model)")
+    calc.add_argument("--head-dim", type=int, default=128, help="Head dimension (default: 128)")
+    calc.add_argument("--hw", default=None, help="Hardware for fit assessment. Auto-detected if omitted.")
+
+    # ── memory ──
+    sub.add_parser("memory", help="Show current memory usage")
 
     # ── scan ──
     scan = sub.add_parser("scan", help="Scan for locally downloaded models")
@@ -490,6 +509,95 @@ def cmd_recommend(args) -> None:
     print(f"\n  {GREEN}{len(top)}{RESET} recommendations shown")
 
 
+def cmd_calc(args) -> None:
+    has_model = args.model is not None
+    has_custom = args.params is not None and args.bpw is not None
+
+    if not has_model and not has_custom:
+        print(f"{RED}Provide --model or both --params and --bpw.{RESET}")
+        sys.exit(1)
+
+    if has_model:
+        model = resolve_model(args.model)
+        if not model:
+            sys.exit(1)
+        if args.quant not in QUANT_FORMATS:
+            print(f"{RED}Unknown quant format: '{args.quant}'. Use 'list-quants' to see options.{RESET}")
+            sys.exit(1)
+        quant = QUANT_FORMATS[args.quant]
+        if has_custom:
+            print(f"{YELLOW}Using --model; ignoring --params/--bpw.{RESET}", file=sys.stderr)
+
+        label = f"{model.name} @ {quant.name}"
+        params_b = model.params_billion
+        bpw = quant.bits_per_weight
+        model_size = estimate_model_size_gb(params_b, bpw)
+        kv_cache = estimate_kv_cache_gb(model, args.context)
+    else:
+        label = f"Custom {args.params:.1f}B @ {args.bpw:.1f} bpw"
+        params_b = args.params
+        bpw = args.bpw
+        model_size = estimate_model_size_gb(params_b, bpw)
+        layers = args.layers or 32
+        kv_heads = args.kv_heads or 8
+        kv_cache = estimate_kv_cache_raw(layers, kv_heads, args.head_dim, args.context)
+
+    overhead = estimate_overhead_gb(model_size)
+    total = model_size + kv_cache + overhead
+
+    print_header(f"VRAM Calculation — {label}")
+    print(f"  {BOLD}Parameters:{RESET}    {params_b:.1f}B")
+    print(f"  {BOLD}Bits/weight:{RESET}   {bpw:.1f} bpw")
+    print(f"  {BOLD}Context:{RESET}       {format_context(args.context)} tokens")
+    print()
+    print(f"  {BOLD}Memory Breakdown:{RESET}")
+    print(f"    Model weights:  {format_size(model_size):>8}")
+    print(f"    KV cache:       {format_size(kv_cache):>8}")
+    print(f"    Overhead:       {format_size(overhead):>8}")
+    print(f"    {'─' * 24}")
+    print(f"    {BOLD}Total:          {format_size(total):>8}{RESET}")
+
+    # Fit assessment if hardware is available
+    mac = resolve_hw_or_detect(args.hw)
+    if mac:
+        avail = mac.usable_memory_gb
+        print()
+        print(f"  {BOLD}Hardware:{RESET}      {mac.chip} {mac.memory_gb}GB ({format_size(avail)} usable)")
+        print(f"  {BOLD}Usage:{RESET}         {bar(total, avail)}")
+        if total <= avail:
+            headroom = avail - total
+            print(f"  {BOLD}Headroom:{RESET}      {format_size(headroom)} free")
+        else:
+            over = total - avail
+            print(f"  {RED}{BOLD}Over budget:{RESET}   {format_size(over)} over capacity")
+
+
+def cmd_memory(_args) -> None:
+    if sys.platform != "darwin":
+        print(f"{RED}Memory monitoring requires macOS.{RESET}")
+        sys.exit(1)
+
+    from .memory_monitor import get_memory_sample
+
+    sample = get_memory_sample()
+
+    print_header("Memory Status")
+    print(f"  {BOLD}Used:{RESET}      {sample.used_gb:>6.1f} GB")
+    print(f"  {BOLD}Free:{RESET}      {sample.free_gb:>6.1f} GB")
+    print(f"  {BOLD}Total:{RESET}     {sample.total_gb:>6.1f} GB")
+    print(f"  {BOLD}Usage:{RESET}     {bar(sample.used_gb, sample.total_gb)}")
+
+    # Color pressure level
+    p = sample.pressure.lower()
+    if p == "critical":
+        pcolor = RED
+    elif p == "warn":
+        pcolor = YELLOW
+    else:
+        pcolor = GREEN
+    print(f"  {BOLD}Pressure:{RESET}  {pcolor}{sample.pressure}{RESET}")
+
+
 def cmd_scan(args) -> None:
     from .scanner import scan_all, scan_custom_dir
 
@@ -535,6 +643,8 @@ def main() -> None:
         "detail": lambda: cmd_detail(args),
         "max-context": lambda: cmd_max_context(args),
         "recommend": lambda: cmd_recommend(args),
+        "calc": lambda: cmd_calc(args),
+        "memory": lambda: cmd_memory(args),
         "scan": lambda: cmd_scan(args),
     }
 
