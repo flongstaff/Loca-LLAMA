@@ -976,7 +976,7 @@ class TestDetectLlamaCppServer:
         models_resp = _json_response({"data": []})
         with patch("urllib.request.urlopen", side_effect=[health_resp, models_resp]):
             result = detect_llama_cpp_server()
-        assert result.url == "http://127.0.0.1:8080"
+        assert result.url == "http://127.0.0.1:8082"
 
 
 # ── detect_lm_studio ──────────────────────────────────────────────────────────

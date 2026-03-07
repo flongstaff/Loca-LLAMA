@@ -41,10 +41,11 @@ class BenchmarkResult:
 class RuntimeInfo:
     """Detected runtime with its URL and loaded models."""
 
-    name: str  # "lm-studio", "llama.cpp-server"
+    name: str  # "lm-studio", "llama.cpp-server", "litellm-proxy"
     url: str
     models: list[str]
     version: str | None = None
+    api_key: str | None = None
 
 
 BENCH_PROMPTS = {
@@ -78,9 +79,29 @@ BENCH_MAX_TOKENS = 200
 
 # ── Runtime Detection ────────────────────────────────────────────────────────
 
+def detect_litellm() -> RuntimeInfo | None:
+    """Check if LiteLLM proxy is running (routes to LM Studio or llama.cpp)."""
+    url = "http://127.0.0.1:4000"
+    try:
+        with urllib.request.urlopen(f"{url}/health", timeout=2) as resp:
+            data = json.loads(resp.read().decode())
+            if data.get("healthy_endpoints") or data.get("status") == "healthy":
+                models = []
+                try:
+                    with urllib.request.urlopen(f"{url}/v1/models", timeout=2) as r:
+                        mdata = json.loads(r.read().decode())
+                        models = [m["id"] for m in mdata.get("data", [])]
+                except Exception:
+                    pass
+                return RuntimeInfo(name="litellm-proxy", url=url, models=models, api_key="sk-local")
+    except Exception:
+        pass
+    return None
+
+
 def detect_llama_cpp_server() -> RuntimeInfo | None:
     """Check if llama.cpp server is running."""
-    for port in [8080, 8081, 8000]:
+    for port in [8082, 8080, 8081, 8000]:
         url = f"http://127.0.0.1:{port}"
         try:
             with urllib.request.urlopen(f"{url}/health", timeout=2) as resp:
@@ -115,9 +136,14 @@ def detect_lm_studio() -> RuntimeInfo | None:
 
 
 def detect_all_runtimes() -> list[RuntimeInfo]:
-    """Detect all running LLM runtimes."""
+    """Detect all running LLM runtimes.
+
+    LiteLLM proxy is checked first — if it's running, it can route to
+    whichever backend (LM Studio or llama.cpp) is up, so you only need
+    one model loaded.  Direct backends are still detected for fallback.
+    """
     runtimes = []
-    for detector in [detect_lm_studio, detect_llama_cpp_server]:
+    for detector in [detect_litellm, detect_lm_studio, detect_llama_cpp_server]:
         info = detector()
         if info:
             runtimes.append(info)
@@ -200,8 +226,9 @@ def benchmark_openai_api(
     max_tokens: int = BENCH_MAX_TOKENS,
     context_length: int = 4096,
     run_number: int = 1,
+    api_key: str | None = None,
 ) -> BenchmarkResult:
-    """Run benchmark against an OpenAI-compatible API (LM Studio or llama.cpp).
+    """Run benchmark against an OpenAI-compatible API (LM Studio, llama.cpp, or LiteLLM).
 
     Uses streaming to measure real TTFT (time to first token) and generation
     speed.  Falls back to server-provided timings when available (llama.cpp).
@@ -215,7 +242,9 @@ def benchmark_openai_api(
         "stream": True,
     }).encode()
 
-    headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
+    headers: dict[str, str] = {"Content-Type": "application/json", "Accept": "text/event-stream"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
 
     start = time.perf_counter()
     token_count = 0
@@ -316,6 +345,7 @@ def benchmark_openai_api_streaming(
     prompt: str = BENCH_PROMPTS["default"],
     max_tokens: int = BENCH_MAX_TOKENS,
     timeout: int = 120,
+    api_key: str | None = None,
 ) -> Generator[tuple[str, float], None, None]:
     """Stream tokens from an OpenAI-compatible API, yielding (token_text, elapsed_ms).
 
@@ -333,7 +363,9 @@ def benchmark_openai_api_streaming(
         "stream": True,
     }).encode()
 
-    headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
+    headers: dict[str, str] = {"Content-Type": "application/json", "Accept": "text/event-stream"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
     start = time.perf_counter()
 
@@ -486,7 +518,8 @@ def run_benchmark_suite(
                 break
 
         r = benchmark_openai_api(
-            runtime.url, model_id, runtime.name, prompt, max_tokens, context_length, run_number=i,
+            runtime.url, model_id, runtime.name, prompt, max_tokens, context_length,
+            run_number=i, api_key=runtime.api_key,
         )
         results.append(r)
 

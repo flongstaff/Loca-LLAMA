@@ -231,16 +231,77 @@ class LlamaCppConnector:
         return proc
 
 
+class LiteLLMConnector:
+    """Connect to LiteLLM proxy.
+
+    LiteLLM translates Anthropic/OpenAI APIs and routes to whichever
+    backend (LM Studio or llama.cpp) is running.  Default port: 4000.
+    """
+
+    def __init__(self, base_url: str = "http://127.0.0.1:4000"):
+        self.base_url = base_url
+
+    def is_running(self) -> bool:
+        try:
+            with urllib.request.urlopen(f"{self.base_url}/health", timeout=3) as resp:
+                data = json.loads(resp.read().decode())
+                return bool(data.get("healthy_endpoints") or data.get("status") == "healthy")
+        except Exception:
+            return False
+
+    def list_models(self) -> list[str]:
+        """List models available through LiteLLM."""
+        try:
+            with urllib.request.urlopen(f"{self.base_url}/v1/models", timeout=5) as resp:
+                data = json.loads(resp.read().decode())
+                return [m["id"] for m in data.get("data", [])]
+        except Exception:
+            return []
+
+    def chat(
+        self,
+        model_id: str,
+        messages: list[dict],
+        max_tokens: int = 200,
+        temperature: float = 0.7,
+        stream: bool = False,
+    ) -> dict:
+        """Send a chat completion request via LiteLLM."""
+        payload = json.dumps({
+            "model": model_id,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": stream,
+        }).encode()
+
+        req = urllib.request.Request(
+            f"{self.base_url}/v1/chat/completions",
+            data=payload,
+            headers={"Content-Type": "application/json", "Authorization": "Bearer sk-local"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            return json.loads(resp.read().decode())
+
+
 def detect_all_connectors() -> dict[str, object]:
-    """Detect and return all available runtime connectors."""
+    """Detect and return all available runtime connectors.
+
+    LiteLLM proxy is checked first — it routes to whichever backend is up.
+    """
     connectors = {}
+
+    litellm = LiteLLMConnector()
+    if litellm.is_running():
+        connectors["litellm"] = litellm
 
     lms = LMStudioConnector()
     if lms.is_running():
         connectors["lm-studio"] = lms
 
-    # Try multiple ports for llama.cpp
-    for port in [8080, 8081, 8000]:
+    # Try multiple ports for llama.cpp (8082 is the configured default)
+    for port in [8082, 8080, 8081, 8000]:
         lcp = LlamaCppConnector(f"http://127.0.0.1:{port}")
         if lcp.is_running():
             connectors[f"llama.cpp:{port}"] = lcp

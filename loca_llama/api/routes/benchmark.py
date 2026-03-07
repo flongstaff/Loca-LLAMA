@@ -171,6 +171,7 @@ async def stream_benchmark(
             try:
                 for token_text, elapsed_ms in benchmark_openai_api_streaming(
                     runtime.url, model_id, prompt, max_tokens,
+                    api_key=runtime.api_key,
                 ):
                     if stop_event.is_set():
                         break
