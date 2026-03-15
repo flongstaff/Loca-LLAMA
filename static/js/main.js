@@ -1,5 +1,6 @@
 import { initTheme } from "./theme.js";
 import { initTabs } from "./tabs.js";
+import { initMyMac, loadMyMac } from "./mymac.js";
 import { initCompat } from "./compat.js";
 import { initModels } from "./models.js";
 import { initLocal } from "./local.js";
@@ -14,6 +15,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   initTheme();
   initTabs();
+  initMyMac();
   initCompat();
   initModels();
   initLocal();
@@ -22,4 +24,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initMemory();
   initCalculator();
   initRecommend();
+
+  // My Mac is the default tab — load it immediately
+  loadMyMac();
 });

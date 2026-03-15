@@ -373,7 +373,7 @@ export function drawLineChart(canvas, data, options = {}) {
 
 function roundedRect(ctx, x, y, w, h, r, roundTop, roundBottom) {
   if (h < 1) { ctx.rect(x, y, w, h); return; }
-  r = Math.min(r, w / 2, h / 2);
+  r = Math.max(0, Math.min(r, w / 2, h / 2));
   ctx.moveTo(x + (roundTop ? r : 0), y);
   ctx.lineTo(x + w - (roundTop ? r : 0), y);
   if (roundTop) ctx.arcTo(x + w, y, x + w, y + r, r);

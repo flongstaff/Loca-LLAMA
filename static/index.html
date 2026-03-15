@@ -40,7 +40,8 @@
       </button>
     </div>
     <nav>
-      <button data-tab="compatibility" class="active">Compatibility</button>
+      <button data-tab="mymac" class="active">My Mac</button>
+      <button data-tab="compatibility">Compatibility</button>
       <button data-tab="models">Models</button>
       <button data-tab="local">Local Models</button>
       <button data-tab="hub">HuggingFace</button>
@@ -52,7 +53,13 @@
   </header>
 
   <main>
-    <section id="tab-compatibility" class="tab-content active">
+    <section id="tab-mymac" class="tab-content active">
+      <h2>My Mac</h2>
+      <div id="mymac-content"></div>
+      <div id="mymac-memory" class="mt-4"></div>
+    </section>
+
+    <section id="tab-compatibility" class="tab-content">
       <h2>Compatibility Check</h2>
       <div class="controls">
         <label>Hardware
@@ -179,6 +186,53 @@
         <textarea id="bench-custom-prompt-text" rows="3" placeholder="Enter your custom prompt…" class="w-full resize-v"></textarea>
       </div>
 
+      <div class="throughput-section mt-4" id="bench-throughput-section">
+        <div class="sweep-toggle">
+          <label class="checkbox-label">
+            <input type="checkbox" id="bench-throughput-toggle"> Throughput Test — measure concurrent performance
+          </label>
+        </div>
+        <div id="bench-throughput-controls" class="hidden">
+          <div class="controls">
+            <label>Concurrency
+              <select id="bench-concurrency-select">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="4" selected>4</option>
+                <option value="8">8</option>
+                <option value="16">16</option>
+                <option value="32">32</option>
+              </select>
+            </label>
+            <label>Total Requests
+              <input type="number" id="bench-total-requests" value="8" min="1" max="100" class="input-narrow">
+            </label>
+            <button class="btn" id="bench-throughput-start-btn" disabled>Start Throughput Test</button>
+          </div>
+        </div>
+      </div>
+      <div id="bench-throughput-results"></div>
+
+      <div class="compare-section mt-4" id="bench-compare-section">
+        <div class="sweep-toggle">
+          <label class="checkbox-label">
+            <input type="checkbox" id="bench-compare-toggle"> Compare Mode — benchmark two runtimes side-by-side
+          </label>
+        </div>
+        <div id="bench-compare-controls" class="hidden">
+          <div class="controls">
+            <label>Runtime A
+              <select id="bench-compare-runtime-a" disabled><option value="">Detect runtimes first…</option></select>
+            </label>
+            <label>Runtime B
+              <select id="bench-compare-runtime-b" disabled><option value="">Detect runtimes first…</option></select>
+            </label>
+            <button class="btn" id="bench-compare-start-btn" disabled>Compare Runtimes</button>
+          </div>
+        </div>
+      </div>
+      <div id="bench-compare-results"></div>
+
       <div class="sweep-section" id="bench-sweep-section">
         <div class="sweep-toggle">
           <label class="checkbox-label">
@@ -244,6 +298,12 @@
               <option value="16" selected>FP16 (16-bit)</option>
               <option value="8">INT8 (8-bit)</option>
               <option value="4">INT4 (4-bit)</option>
+            </select>
+          </label>
+          <label>Inference Mode
+            <select id="calc-inference-mode">
+              <option value="streaming" selected>Streaming (incremental)</option>
+              <option value="batch">Batch (bulk processing)</option>
             </select>
           </label>
         </div>
@@ -315,6 +375,6 @@
     Loca-LLAMA v0.1.0 &middot; localhost:8000
   </footer>
 
-  <script type="module" src="/js/main.js"></script>
+  <script type="module" src="/js/main.js?v=2"></script>
 </body>
 </html>

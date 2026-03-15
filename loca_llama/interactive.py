@@ -18,7 +18,9 @@ from .benchmark import (
     detect_all_runtimes, RuntimeInfo, BenchmarkResult,
     run_benchmark_suite, aggregate_results,
     benchmark_llama_cpp_native, BENCH_PROMPTS,
+    get_lm_studio_preset_info,
 )
+from .benchmark_export import export_benchmarks_with_presets
 from .templates import get_template, get_lm_studio_preset, get_llama_cpp_command, get_llama_cpp_server_command, detect_model_format_warning
 from .memory_monitor import (
     MemoryMonitor, MemoryReport, get_memory_sample,
@@ -773,12 +775,14 @@ def _display_benchmark_comparison(all_results: dict[str, list[BenchmarkResult]],
             for r in results:
                 if r.success:
                     run_label = f"{'W' if r.run_number == 1 and num_runs > 1 else r.run_number}"
+                    preset_info = f"  [{r.preset_name}]" if r.preset_name and r.preset_name != "default" else ""
                     print(
                         f"  {runtime_name:<18} {run_label:>4} "
                         f"{color_speed(r.tokens_per_second):>12} "
                         f"{r.prompt_tokens_per_second:>8.0f} tok/s "
                         f"{r.time_to_first_token_ms:>7.0f} ms "
                         f"{r.generated_tokens:>7}"
+                        f"{preset_info}"
                     )
                 else:
                     run_label = f"{'W' if r.run_number == 1 and num_runs > 1 else r.run_number}"
@@ -796,8 +800,15 @@ def _display_benchmark_comparison(all_results: dict[str, list[BenchmarkResult]],
         if not agg["success"]:
             print(f"  {runtime_name:<18} {RED}All runs failed{RESET}")
             continue
+        
+        # Try to get preset info from results
+        preset_display = runtime_name
+        results = all_results.get(runtime_name, [])
+        if results and results[0].preset_name and results[0].preset_name != "default":
+            preset_display = f"{runtime_name} ({results[0].preset_name})"
+        
         print(
-            f"  {runtime_name:<18} "
+            f"  {preset_display:<32} "
             f"{color_speed(agg['avg_tok_per_sec']):>12} "
             f"{agg['min_tok_per_sec']:>7.1f} t/s "
             f"{agg['max_tok_per_sec']:>7.1f} t/s "
@@ -1108,14 +1119,31 @@ def screen_benchmark(mac: MacSpec):
                 key = f"llama.cpp-cli ({prompt_type})" if run_all else "llama.cpp-cli"
                 all_results[key] = cli_results
             else:
+                # Try to detect preset name for LM Studio
+                preset_name = None
+                preset_config = None
+                if selected_rt.name == "lm-studio":
+                    preset_info = get_lm_studio_preset_info(selected_model, selected_rt.url)
+                    if preset_info:
+                        preset_name = preset_info.get("name", preset_info.get("presetName", "LM Studio Preset"))
+                        preset_config = preset_info.get("config", preset_info)
+                
                 print(f"\n  {runtime_badge(selected_rt.name)} Benchmarking {BOLD}{selected_model}{RESET}...")
+                if preset_name:
+                    print(f"    Using preset: {preset_name}")
+                
                 def progress(run: int, total: int) -> None:
                     label = "warmup" if run == 1 and total > 1 else f"run {run}"
                     current = monitor.get_current()
                     mem_str = f" {format_mini_memory_bar(current)}" if current else ""
                     print(f"    {DIM}[{label}/{total}]{RESET}{mem_str}", end=" ", flush=True)
 
-                results = run_benchmark_suite(selected_rt, selected_model, prompt_type, num_runs, progress_callback=progress)
+                results = run_benchmark_suite(
+                    selected_rt, selected_model, prompt_type, num_runs,
+                    progress_callback=progress,
+                    preset_name=preset_name,
+                    preset_config=preset_config,
+                )
                 print()
                 key = f"{selected_rt.name} ({prompt_type})" if run_all else selected_rt.name
                 all_results[key] = results
@@ -1132,8 +1160,25 @@ def screen_benchmark(mac: MacSpec):
                     if not matched and len(ort.models) == 1:
                         matched = ort.models[0]
                     if matched and prompt_yes_no(f"  Also benchmark on {ort.name} ({matched})?"):
+                        # Try to get preset for this runtime too
+                        other_preset_name = None
+                        other_preset_config = None
+                        if ort.name == "lm-studio":
+                            other_preset_info = get_lm_studio_preset_info(matched, ort.url)
+                            if other_preset_info:
+                                other_preset_name = other_preset_info.get("name", "LM Studio Preset")
+                                other_preset_config = other_preset_info.get("config", other_preset_info)
+                        
                         print(f"\n  {runtime_badge(ort.name)} Benchmarking {BOLD}{matched}{RESET}...")
-                        results = run_benchmark_suite(ort, matched, prompt_type, num_runs, progress_callback=progress)
+                        if other_preset_name:
+                            print(f"    Using preset: {other_preset_name}")
+                        
+                        results = run_benchmark_suite(
+                            ort, matched, prompt_type, num_runs,
+                            progress_callback=progress,
+                            preset_name=other_preset_name,
+                            preset_config=other_preset_config,
+                        )
                         print()
                         key = f"{ort.name} ({prompt_type})" if run_all else ort.name
                         all_results[key] = results
@@ -1141,6 +1186,23 @@ def screen_benchmark(mac: MacSpec):
         mem_report = monitor.stop()
 
         _display_benchmark_comparison(all_results, num_runs, mem_report)
+
+        # Export to CSV with preset information
+        export_path = "benchmark_results.csv"
+        try:
+            # Collect all results
+            all_results_list: list[BenchmarkResult] = []
+            for results_list in all_results.values():
+                all_results_list.extend(results_list)
+            
+            if all_results_list:
+                export_benchmarks_with_presets(
+                    all_results_list,
+                    csv_path=export_path,
+                    md_path="benchmark_results.md",
+                )
+        except Exception as e:
+            print(f"\n  {YELLOW}Warning: Could not export benchmarks: {e}{RESET}")
 
         # Offer to run another benchmark with the same model
         after_options = [

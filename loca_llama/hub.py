@@ -24,6 +24,8 @@ class HubModel:
 
 HF_API = "https://huggingface.co/api/models"
 
+_SORT_ALLOWLIST = {"downloads", "likes", "trending", "lastModified", "created"}
+
 
 def search_huggingface(
     query: str,
@@ -36,9 +38,12 @@ def search_huggingface(
     Args:
         query: Search query (e.g. "llama 8b gguf")
         limit: Max number of results
-        sort: Sort by "downloads", "likes", or "lastModified"
+        sort: Sort by "downloads", "likes", "trending", "lastModified", or "created"
         filter_tags: Optional tag filters (e.g. ["gguf", "text-generation"])
     """
+    if sort not in _SORT_ALLOWLIST:
+        raise ValueError(f"sort must be one of {sorted(_SORT_ALLOWLIST)}, got {sort!r}")
+
     params = {
         "search": query,
         "limit": str(limit),

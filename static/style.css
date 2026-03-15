@@ -631,7 +631,7 @@ th.sort-desc::after {
 
 .calculator-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(280px, 1fr) 2fr;
   gap: var(--space-6);
   margin-top: var(--space-4);
 }
@@ -642,6 +642,10 @@ th.sort-desc::after {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--space-5);
+}
+
+.calculator-inputs {
+  min-width: 280px;
 }
 
 .calculator-inputs h3,
@@ -880,6 +884,20 @@ tr.clickable-row.active-row {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ── My Mac Tab ────────────────────────────────────────────────────── */
+
+.mymac-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.mymac-header h3 {
+  margin: 0;
+  font-size: var(--text-xl);
 }
 
 /* ── Footer ─────────────────────────────────────────────────────────── */

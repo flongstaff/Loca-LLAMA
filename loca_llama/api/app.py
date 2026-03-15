@@ -7,8 +7,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from loca_llama.api.dependencies import init_state
 from loca_llama.api.routes import all_routers
@@ -40,6 +41,21 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+
+    # Restrict incoming Host headers to localhost only
+    application.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=["localhost", "127.0.0.1"],
+    )
+
+    # Add security response headers
+    @application.middleware("http")
+    async def add_security_headers(request: Request, call_next) -> Response:
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        return response
 
     # Create shared state and wire up dependency injection
     state = AppState()

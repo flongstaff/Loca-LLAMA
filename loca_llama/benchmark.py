@@ -1,5 +1,8 @@
 """Benchmark runner: test models on LM Studio and llama.cpp."""
 
+from __future__ import annotations
+
+import csv
 import json
 import re
 import shutil
@@ -11,6 +14,7 @@ import urllib.request
 from collections.abc import Generator
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -31,6 +35,8 @@ class BenchmarkResult:
     run_number: int = 1
     error: str | None = None
     extra: dict = field(default_factory=dict)
+    preset_name: str | None = None  # LM Studio preset name (e.g., "35b thinking general")
+    preset_config: dict | None = None  # Full preset configuration dict
 
     @property
     def time_to_first_token_ms(self) -> float:
@@ -99,9 +105,34 @@ def detect_litellm() -> RuntimeInfo | None:
     return None
 
 
+def detect_omlx() -> RuntimeInfo | None:
+    """Check if oMLX server is running."""
+    url = "http://127.0.0.1:8000"
+    api_key = "9514"
+    try:
+        with urllib.request.urlopen(f"{url}/health", timeout=2) as resp:
+            data = json.loads(resp.read().decode())
+            if data.get("status") == "healthy":
+                models = []
+                try:
+                    req = urllib.request.Request(
+                        f"{url}/v1/models",
+                        headers={"Authorization": f"Bearer {api_key}"},
+                    )
+                    with urllib.request.urlopen(req, timeout=2) as r:
+                        mdata = json.loads(r.read().decode())
+                        models = [m["id"] for m in mdata.get("data", [])]
+                except Exception:
+                    models = ["(omlx model)"]
+                return RuntimeInfo(name="omlx", url=url, models=models, api_key=api_key)
+    except Exception:
+        pass
+    return None
+
+
 def detect_llama_cpp_server() -> RuntimeInfo | None:
     """Check if llama.cpp server is running."""
-    for port in [8082, 8080, 8081, 8000]:
+    for port in [8082, 8080, 8081]:
         url = f"http://127.0.0.1:{port}"
         try:
             with urllib.request.urlopen(f"{url}/health", timeout=2) as resp:
@@ -135,6 +166,58 @@ def detect_lm_studio() -> RuntimeInfo | None:
     return None
 
 
+def get_lm_studio_preset_info(model_id: str, base_url: str = "http://127.0.0.1:1234") -> dict | None:
+    """Fetch preset information from LM Studio for a loaded model.
+
+    LM Studio stores presets per model. This attempts to fetch the current
+    preset configuration for the specified model.
+
+    Returns dict with preset info, or None if not available.
+    """
+    # LM Studio doesn't have a direct API for presets, but we can infer from
+    # the model's loaded configuration and known preset patterns
+    try:
+        # Try to get model details which may include preset info
+        with urllib.request.urlopen(f"{base_url}/v1/models", timeout=2) as resp:
+            data = json.loads(resp.read().decode())
+            for model in data.get("data", []):
+                if model["id"] == model_id:
+                    preset_info = model.get("preset_info") or model.get("config", {})
+                    if preset_info:
+                        return preset_info
+    except Exception:
+        pass
+
+    # Fallback: try common preset endpoints
+    # LM Studio v0.2+ uses /api/presets endpoint
+    preset_endpoints = [
+        f"{base_url}/api/presets",
+        f"{base_url}/api/model-presets",
+        f"{base_url}/presets",
+    ]
+
+    for endpoint in preset_endpoints:
+        try:
+            with urllib.request.urlopen(endpoint, timeout=2) as resp:
+                presets_data = json.loads(resp.read().decode())
+                # Look for preset matching this model
+                if isinstance(presets_data, list):
+                    for preset in presets_data:
+                        if preset.get("modelId") == model_id or preset.get("model") == model_id:
+                            return preset
+                elif isinstance(presets_data, dict):
+                    # Try to find preset by model_id
+                    if presets_data.get("modelId") == model_id:
+                        return presets_data
+                    for key, value in presets_data.items():
+                        if isinstance(value, dict) and value.get("modelId") == model_id:
+                            return value
+        except Exception:
+            continue
+
+    return None
+
+
 def detect_all_runtimes() -> list[RuntimeInfo]:
     """Detect all running LLM runtimes.
 
@@ -143,7 +226,7 @@ def detect_all_runtimes() -> list[RuntimeInfo]:
     one model loaded.  Direct backends are still detected for fallback.
     """
     runtimes = []
-    for detector in [detect_litellm, detect_lm_studio, detect_llama_cpp_server]:
+    for detector in [detect_omlx, detect_litellm, detect_lm_studio, detect_llama_cpp_server]:
         info = detector()
         if info:
             runtimes.append(info)
@@ -227,6 +310,8 @@ def benchmark_openai_api(
     context_length: int = 4096,
     run_number: int = 1,
     api_key: str | None = None,
+    preset_name: str | None = None,
+    preset_config: dict | None = None,
 ) -> BenchmarkResult:
     """Run benchmark against an OpenAI-compatible API (LM Studio, llama.cpp, or LiteLLM).
 
@@ -290,8 +375,13 @@ def benchmark_openai_api(
                             ttft_ms = elapsed
                             first_token_time = elapsed
                         last_token_time = elapsed
-    except Exception as e:
+    except (urllib.error.HTTPError, urllib.error.URLError, socket.timeout, socket.gaierror, ConnectionResetError, BrokenPipeError, ConnectionRefusedError) as e:
+        # Network errors - model crashed or server unreachable
         error_msg = format_benchmark_error(e, runtime_name, base_url)
+        return _make_fail_result(model_id, runtime_name, context_length, error_msg, run_number)
+    except Exception as e:
+        # Unexpected errors
+        error_msg = f"Unexpected error: {type(e).__name__}: {e}"
         return _make_fail_result(model_id, runtime_name, context_length, error_msg, run_number)
 
     total_ms = (time.perf_counter() - start) * 1000
@@ -322,6 +412,12 @@ def benchmark_openai_api(
     tok_per_sec = (gen_tokens_for_speed / eval_ms * 1000) if eval_ms > 0 else 0
     prompt_tok_per_sec = (prompt_tokens / prompt_eval_ms * 1000) if prompt_eval_ms > 0 and prompt_tokens > 0 else 0
 
+    # Detect silent failures: no tokens generated means benchmark failed
+    success = token_count > 0
+    error = None
+    if not success:
+        error = "No tokens generated (model may have crashed or rejected request)"
+
     return BenchmarkResult(
         model_name=model_id,
         runtime=runtime_name,
@@ -333,9 +429,12 @@ def benchmark_openai_api(
         tokens_per_second=tok_per_sec,
         prompt_tokens_per_second=prompt_tok_per_sec,
         context_length=context_length,
-        success=True,
+        success=success,
         run_number=run_number,
+        error=error,
         extra=timings,
+        preset_name=preset_name,
+        preset_config=preset_config,
     )
 
 
@@ -493,6 +592,8 @@ def run_benchmark_suite(
     context_length: int = 4096,
     progress_callback=None,
     custom_prompt: str | None = None,
+    preset_name: str | None = None,
+    preset_config: dict | None = None,
 ) -> list[BenchmarkResult]:
     """Run a multi-round benchmark. First run is warmup.
 
@@ -520,6 +621,7 @@ def run_benchmark_suite(
         r = benchmark_openai_api(
             runtime.url, model_id, runtime.name, prompt, max_tokens, context_length,
             run_number=i, api_key=runtime.api_key,
+            preset_name=preset_name, preset_config=preset_config,
         )
         results.append(r)
 
@@ -663,7 +765,12 @@ def benchmark_with_server(
 
 
 def aggregate_results(results: list[BenchmarkResult], skip_first: bool = True) -> dict:
-    """Aggregate multiple benchmark runs, optionally skipping warmup."""
+    """Aggregate multiple benchmark runs, optionally skipping warmup.
+
+    Includes median, p95, and standard deviation for generation speed.
+    """
+    import statistics
+
     successful = [r for r in results if r.success]
     if skip_first and len(successful) > 1:
         successful = successful[1:]
@@ -675,12 +782,19 @@ def aggregate_results(results: list[BenchmarkResult], skip_first: bool = True) -
     prefill_speeds = [r.prompt_tokens_per_second for r in successful]
     ttfts = [r.time_to_first_token_ms for r in successful]
 
+    tok_speeds_sorted = sorted(tok_speeds)
+    p95_idx = int(len(tok_speeds_sorted) * 0.95)
+    p95_idx = min(p95_idx, len(tok_speeds_sorted) - 1)
+
     return {
         "success": True,
         "runs": len(successful),
         "avg_tok_per_sec": sum(tok_speeds) / len(tok_speeds),
         "min_tok_per_sec": min(tok_speeds),
         "max_tok_per_sec": max(tok_speeds),
+        "median_tok_per_sec": statistics.median(tok_speeds),
+        "p95_tok_per_sec": tok_speeds_sorted[p95_idx],
+        "stddev_tok_per_sec": statistics.stdev(tok_speeds) if len(tok_speeds) >= 2 else 0.0,
         "avg_prefill_tok_per_sec": sum(prefill_speeds) / len(prefill_speeds),
         "avg_ttft_ms": sum(ttfts) / len(ttfts),
         "avg_total_ms": sum(r.total_time_ms for r in successful) / len(successful),

@@ -97,4 +97,9 @@ MODELS: list[LLMModel] = [
     # Falcon
     LLMModel("Falcon 7B", "Falcon", 6.92, 2048, 2048, 32, 1, 64, "Apache 2.0"),
     LLMModel("Falcon 40B", "Falcon", 40.0, 2048, 2048, 60, 8, 128, "Apache 2.0"),
+    # User's Custom Models (oMLX)
+    LLMModel("Qwen3.5-27B-Claude-4.6-Opus-Distilled-MLX-4bit", "Qwen", 27.0, 4096, 262144, 64, 4, 256, "MLX"),
+    LLMModel("Qwen3.5-2B-6bit", "Qwen", 2.0, 4096, 262144, 28, 4, 256, "MLX"),
+    LLMModel("Qwen3.5-35B-A3B-6bit", "Qwen", 35.0, 4096, 262144, 40, 2, 256, "MLX"),
+    LLMModel("gpt-oss-20b-MXFP4-Q8", "GPT-OSS", 20.0, 4096, 131072, 44, 8, 128, "MXFP4"),
 ]

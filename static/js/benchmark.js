@@ -11,6 +11,10 @@ let sweepPollTimer = null;
 let lastBenchResult = null;
 let lastSweepResult = null;
 let lastSweepAggregates = null;
+let throughputJobId = null;
+let throughputPollTimer = null;
+let compareJobId = null;
+let comparePollTimer = null;
 
 async function detectRuntimes() {
   const btn = document.getElementById("detect-runtimes-btn");
@@ -84,6 +88,12 @@ function onRuntimeChange() {
 
   // Populate sweep model checkboxes
   populateSweepModels(rt.models);
+
+  // Enable throughput button
+  updateThroughputBtn();
+
+  // Populate compare runtime dropdowns
+  populateCompareRuntimes();
 }
 
 async function startBenchmark() {
@@ -185,8 +195,11 @@ function renderBenchmarkStatus(data) {
         <h3>Summary (${a.runs} run${a.runs !== 1 ? "s" : ""}, warmup skipped)</h3>
         <div class="detail-grid">
           <div class="detail-item"><span class="label">Avg tok/s</span><span class="value">${a.avg_tok_per_sec}</span></div>
+          <div class="detail-item"><span class="label">Median tok/s</span><span class="value">${a.median_tok_per_sec}</span></div>
+          <div class="detail-item"><span class="label">P95 tok/s</span><span class="value">${a.p95_tok_per_sec}</span></div>
           <div class="detail-item"><span class="label">Min tok/s</span><span class="value">${a.min_tok_per_sec}</span></div>
           <div class="detail-item"><span class="label">Max tok/s</span><span class="value">${a.max_tok_per_sec}</span></div>
+          <div class="detail-item"><span class="label">Std Dev</span><span class="value">${a.stddev_tok_per_sec}</span></div>
           <div class="detail-item"><span class="label">Avg Prefill tok/s</span><span class="value">${a.avg_prefill_tok_per_sec}</span></div>
           <div class="detail-item"><span class="label">Avg TTFT</span><span class="value">${a.avg_ttft_ms} ms</span></div>
           <div class="detail-item"><span class="label">Avg Total</span><span class="value">${a.avg_total_ms} ms</span></div>
@@ -222,8 +235,11 @@ function renderBenchmarkStatus(data) {
       </table>`;
   }
 
-  // Export button
-  html += `<button class="btn btn-export mt-3" id="bench-export-btn">Export JSON</button>`;
+  // Export buttons
+  html += `<div class="mt-3">
+    <button class="btn btn-export" id="bench-export-btn">Export JSON</button>
+    <button class="btn btn-export ml-2" id="bench-export-html-btn">Export HTML Report</button>
+  </div>`;
 
   // Per-run chart canvas
   if (data.runs && data.runs.length > 1) {
@@ -244,8 +260,29 @@ function renderBenchmarkStatus(data) {
     }
   }
 
-  // Wire export button
+  // Wire export buttons
   document.getElementById("bench-export-btn").addEventListener("click", () => exportJson(lastBenchResult, "benchmark"));
+  document.getElementById("bench-export-html-btn").addEventListener("click", exportHtmlReport);
+}
+
+async function exportHtmlReport() {
+  if (!benchJobId) return;
+  try {
+    const resp = await fetch(`/api/benchmark/${benchJobId}/report`);
+    if (!resp.ok) throw new Error("Report generation failed");
+    const html = await resp.text();
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `benchmark-report-${Date.now()}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    alert("Failed to export HTML report: " + err.message);
+  }
 }
 
 function onPromptTypeChange() {
@@ -598,6 +635,306 @@ function reRenderBenchCharts() {
   }
 }
 
+// ── Throughput Test ─────────────────────────────────────────────────────
+
+function onThroughputToggle() {
+  const checked = document.getElementById("bench-throughput-toggle").checked;
+  document.getElementById("bench-throughput-controls").classList.toggle("hidden", !checked);
+}
+
+function updateThroughputBtn() {
+  const runtimeName = document.getElementById("bench-runtime-select").value;
+  const modelId = document.getElementById("bench-model-select").value;
+  const btn = document.getElementById("bench-throughput-start-btn");
+  btn.disabled = !runtimeName || !modelId;
+}
+
+async function startThroughput() {
+  const runtimeName = document.getElementById("bench-runtime-select").value;
+  const modelId = document.getElementById("bench-model-select").value;
+  const concurrency = parseInt(document.getElementById("bench-concurrency-select").value, 10);
+  const totalRequests = parseInt(document.getElementById("bench-total-requests").value, 10) || 8;
+
+  if (!runtimeName || !modelId) return;
+
+  const btn = document.getElementById("bench-throughput-start-btn");
+  const statusDiv = document.getElementById("bench-status");
+  const resultsDiv = document.getElementById("bench-throughput-results");
+
+  btn.disabled = true;
+  btn.textContent = "Running…";
+  resultsDiv.innerHTML = "";
+  statusDiv.innerHTML = '<p class="loading">Starting throughput test…</p>';
+
+  try {
+    const data = await api.post("/benchmark/throughput", {
+      runtime_name: runtimeName,
+      model_id: modelId,
+      concurrency,
+      total_requests: totalRequests,
+    });
+    throughputJobId = data.job_id;
+    pollThroughputStatus();
+  } catch (err) {
+    statusDiv.innerHTML = `<p class="error-message">${escapeHtml(err.message)}</p>`;
+    btn.disabled = false;
+    btn.textContent = "Start Throughput Test";
+  }
+}
+
+function pollThroughputStatus() {
+  if (!throughputJobId) return;
+  clearTimeout(throughputPollTimer);
+
+  const poll = async () => {
+    try {
+      const data = await api.get(`/benchmark/throughput/${throughputJobId}`);
+      renderThroughputStatus(data);
+      if (data.status === "running") {
+        throughputPollTimer = setTimeout(poll, 1000);
+      } else {
+        const btn = document.getElementById("bench-throughput-start-btn");
+        btn.disabled = false;
+        btn.textContent = "Start Throughput Test";
+        updateThroughputBtn();
+      }
+    } catch (err) {
+      document.getElementById("bench-status").innerHTML =
+        `<p class="error-message">${escapeHtml(err.message)}</p>`;
+      const btn = document.getElementById("bench-throughput-start-btn");
+      btn.disabled = false;
+      btn.textContent = "Start Throughput Test";
+    }
+  };
+  poll();
+}
+
+function renderThroughputStatus(data) {
+  const statusDiv = document.getElementById("bench-status");
+  const resultsDiv = document.getElementById("bench-throughput-results");
+
+  if (data.status === "running") {
+    statusDiv.innerHTML = '<p class="loading">Throughput test in progress…</p>';
+    return;
+  }
+
+  if (data.status === "error") {
+    statusDiv.innerHTML = `<p class="error-message">Throughput test failed: ${escapeHtml(data.error || "Unknown error")}</p>`;
+    return;
+  }
+
+  statusDiv.innerHTML = '<p class="text-accent">Throughput test complete.</p>';
+
+  resultsDiv.innerHTML = `
+    <div class="detail-panel detail-panel--visible mb-4">
+      <h3>Throughput Results (${data.concurrency} concurrent, ${data.total_requests} requests)</h3>
+      <div class="detail-grid">
+        <div class="detail-item"><span class="label">Aggregate Throughput</span><span class="value font-bold">${data.throughput_tps} tok/s</span></div>
+        <div class="detail-item"><span class="label">Total Tokens</span><span class="value">${data.total_tokens}</span></div>
+        <div class="detail-item"><span class="label">Elapsed</span><span class="value">${data.elapsed_seconds}s</span></div>
+        <div class="detail-item"><span class="label">Success / Failed</span><span class="value">${data.successful_requests} / ${data.failed_requests}</span></div>
+        <div class="detail-item"><span class="label">Avg Latency</span><span class="value">${data.avg_latency_ms} ms</span></div>
+        <div class="detail-item"><span class="label">Min Latency</span><span class="value">${data.min_latency_ms} ms</span></div>
+        <div class="detail-item"><span class="label">Max Latency</span><span class="value">${data.max_latency_ms} ms</span></div>
+        <div class="detail-item"><span class="label">Error Rate</span><span class="value">${(data.error_rate * 100).toFixed(1)}%</span></div>
+      </div>
+    </div>`;
+
+  // Per-request table
+  if (data.per_request && data.per_request.length > 0) {
+    const rows = data.per_request.map(r => `
+      <tr class="${r.success ? '' : 'error-row'}">
+        <td class="num">${r.request_id}</td>
+        <td>${r.success ? 'Pass' : 'Fail'}</td>
+        <td class="num">${r.tokens_generated}</td>
+        <td class="num">${r.elapsed_ms}</td>
+        <td class="num">${r.tokens_per_second}</td>
+      </tr>`).join("");
+    resultsDiv.innerHTML += `
+      <table>
+        <thead><tr><th>Request</th><th>Status</th><th>Tokens</th><th>Latency (ms)</th><th>tok/s</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+}
+
+// ── Compare Mode ───────────────────────────────────────────────────────
+
+function onCompareToggle() {
+  const checked = document.getElementById("bench-compare-toggle").checked;
+  document.getElementById("bench-compare-controls").classList.toggle("hidden", !checked);
+}
+
+function populateCompareRuntimes() {
+  const selA = document.getElementById("bench-compare-runtime-a");
+  const selB = document.getElementById("bench-compare-runtime-b");
+
+  if (benchRuntimes.length < 2) {
+    selA.innerHTML = '<option value="">Need 2+ runtimes…</option>';
+    selB.innerHTML = '<option value="">Need 2+ runtimes…</option>';
+    selA.disabled = true;
+    selB.disabled = true;
+    document.getElementById("bench-compare-start-btn").disabled = true;
+    return;
+  }
+
+  [selA, selB].forEach((sel, idx) => {
+    sel.innerHTML = '<option value="">Select…</option>';
+    benchRuntimes.forEach(r => {
+      const opt = document.createElement("option");
+      opt.value = r.name;
+      opt.textContent = r.name;
+      sel.appendChild(opt);
+    });
+    sel.disabled = false;
+    // Pre-select different runtimes
+    if (benchRuntimes.length >= 2) {
+      sel.value = benchRuntimes[idx % benchRuntimes.length].name;
+    }
+  });
+  updateCompareBtn();
+}
+
+function updateCompareBtn() {
+  const a = document.getElementById("bench-compare-runtime-a").value;
+  const b = document.getElementById("bench-compare-runtime-b").value;
+  const modelId = document.getElementById("bench-model-select").value;
+  document.getElementById("bench-compare-start-btn").disabled = !a || !b || a === b || !modelId;
+}
+
+async function startCompare() {
+  const runtimeA = document.getElementById("bench-compare-runtime-a").value;
+  const runtimeB = document.getElementById("bench-compare-runtime-b").value;
+  const modelId = document.getElementById("bench-model-select").value;
+  const promptType = document.getElementById("bench-prompt-select").value;
+  const numRuns = parseInt(document.getElementById("bench-runs-input").value, 10) || 3;
+
+  if (!runtimeA || !runtimeB || runtimeA === runtimeB || !modelId) return;
+
+  const btn = document.getElementById("bench-compare-start-btn");
+  const statusDiv = document.getElementById("bench-status");
+  const resultsDiv = document.getElementById("bench-compare-results");
+
+  btn.disabled = true;
+  btn.textContent = "Comparing…";
+  resultsDiv.innerHTML = "";
+  statusDiv.innerHTML = '<p class="loading">Running comparison benchmarks…</p>';
+
+  const body = {
+    runtime_a: runtimeA,
+    runtime_b: runtimeB,
+    model_id: modelId,
+    prompt_type: promptType,
+    num_runs: numRuns,
+  };
+  if (promptType === "custom") {
+    body.custom_prompt = document.getElementById("bench-custom-prompt-text").value;
+  }
+
+  try {
+    const data = await api.post("/benchmark/compare", body);
+    compareJobId = data.job_id;
+    pollCompareStatus();
+  } catch (err) {
+    statusDiv.innerHTML = `<p class="error-message">${escapeHtml(err.message)}</p>`;
+    btn.disabled = false;
+    btn.textContent = "Compare Runtimes";
+  }
+}
+
+function pollCompareStatus() {
+  if (!compareJobId) return;
+  clearTimeout(comparePollTimer);
+
+  const poll = async () => {
+    try {
+      const data = await api.get(`/benchmark/compare/${compareJobId}`);
+      renderCompareStatus(data);
+      if (data.status === "running") {
+        comparePollTimer = setTimeout(poll, 1500);
+      } else {
+        const btn = document.getElementById("bench-compare-start-btn");
+        btn.disabled = false;
+        btn.textContent = "Compare Runtimes";
+        updateCompareBtn();
+      }
+    } catch (err) {
+      document.getElementById("bench-status").innerHTML =
+        `<p class="error-message">${escapeHtml(err.message)}</p>`;
+      const btn = document.getElementById("bench-compare-start-btn");
+      btn.disabled = false;
+      btn.textContent = "Compare Runtimes";
+    }
+  };
+  poll();
+}
+
+function renderCompareStatus(data) {
+  const statusDiv = document.getElementById("bench-status");
+  const resultsDiv = document.getElementById("bench-compare-results");
+
+  if (data.status === "running") {
+    statusDiv.innerHTML = '<p class="loading">Running comparison…</p>';
+    return;
+  }
+
+  if (data.status === "error") {
+    statusDiv.innerHTML = `<p class="error-message">Compare failed: ${escapeHtml(data.error || "Unknown")}</p>`;
+    return;
+  }
+
+  statusDiv.innerHTML = '<p class="text-accent">Comparison complete.</p>';
+
+  if (!data.results || data.results.length < 2) {
+    resultsDiv.innerHTML = '<p class="placeholder">No comparison results.</p>';
+    return;
+  }
+
+  const speedupHtml = data.speedup_pct != null
+    ? `<div class="detail-panel detail-panel--visible mb-4">
+        <h3>${escapeHtml(data.faster_runtime)} is ${data.speedup_pct}% faster</h3>
+      </div>`
+    : "";
+
+  const rows = data.results.map(cr => {
+    const a = cr.aggregate;
+    if (!a || a.runs === 0) {
+      return `<tr><td>${escapeHtml(cr.runtime_name)}</td><td colspan="8" class="text-danger">Failed</td></tr>`;
+    }
+    return `<tr>
+      <td>${escapeHtml(cr.runtime_name)}</td>
+      <td class="num">${a.avg_tok_per_sec}</td>
+      <td class="num">${a.median_tok_per_sec}</td>
+      <td class="num">${a.p95_tok_per_sec}</td>
+      <td class="num">${a.min_tok_per_sec}</td>
+      <td class="num">${a.max_tok_per_sec}</td>
+      <td class="num">${a.avg_prefill_tok_per_sec}</td>
+      <td class="num">${a.avg_ttft_ms} ms</td>
+      <td class="num">${a.runs}</td>
+    </tr>`;
+  }).join("");
+
+  resultsDiv.innerHTML = `
+    ${speedupHtml}
+    <table>
+      <thead><tr>
+        <th>Runtime</th><th>Avg tok/s</th><th>Median</th><th>P95</th>
+        <th>Min</th><th>Max</th><th>Prefill tok/s</th><th>Avg TTFT</th><th>Runs</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="chart-container mt-4"><canvas id="bench-compare-chart"></canvas></div>`;
+
+  // Draw comparison bar chart
+  const chartData = data.results
+    .filter(cr => cr.aggregate && cr.aggregate.runs > 0)
+    .map(cr => ({ label: cr.runtime_name, value: cr.aggregate.avg_tok_per_sec }));
+  const canvas = document.getElementById("bench-compare-chart");
+  if (canvas && chartData.length > 0) {
+    drawBarChart(canvas, chartData, { title: "Avg tok/s by Runtime", unit: "", height: 200 });
+  }
+}
+
 export function initBenchmark() {
   document.getElementById("detect-runtimes-btn").addEventListener("click", detectRuntimes);
   document.getElementById("bench-runtime-select").addEventListener("change", onRuntimeChange);
@@ -606,6 +943,16 @@ export function initBenchmark() {
   document.getElementById("bench-prompt-select").addEventListener("change", onPromptTypeChange);
   document.getElementById("bench-sweep-toggle").addEventListener("change", onSweepToggle);
   document.getElementById("bench-sweep-start-btn").addEventListener("click", startSweep);
+
+  // Throughput controls
+  document.getElementById("bench-throughput-toggle").addEventListener("change", onThroughputToggle);
+  document.getElementById("bench-throughput-start-btn").addEventListener("click", startThroughput);
+
+  // Compare controls
+  document.getElementById("bench-compare-toggle").addEventListener("change", onCompareToggle);
+  document.getElementById("bench-compare-start-btn").addEventListener("click", startCompare);
+  document.getElementById("bench-compare-runtime-a").addEventListener("change", updateCompareBtn);
+  document.getElementById("bench-compare-runtime-b").addEventListener("change", updateCompareBtn);
 
   document.addEventListener("themechange", reRenderBenchCharts);
 }

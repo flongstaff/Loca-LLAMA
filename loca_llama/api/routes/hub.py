@@ -4,8 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
+
+_REPO_ID_RE = re.compile(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$")
+
+
+def _validate_repo_id(repo_id: str) -> None:
+    if not _REPO_ID_RE.match(repo_id):
+        raise HTTPException(status_code=400, detail="repo_id must match pattern owner/repo (alphanumeric, dots, dashes, underscores)")
 
 from loca_llama.api.schemas import (
     HubConfigResponse,
@@ -26,7 +35,7 @@ router = APIRouter(prefix="/hub", tags=["hub"])
 async def search_hub(
     query: str = Query(..., description="Search query"),
     limit: int = Query(20, ge=1, le=100, description="Max results"),
-    sort: str = Query("downloads", description="Sort by: downloads, likes, lastModified"),
+    sort: Literal["downloads", "likes", "trending", "lastModified", "created"] = Query("downloads", description="Sort by: downloads, likes, trending, lastModified, created"),
     format: str | None = Query(None, description="Format filter: gguf, mlx, or None for all"),
 ) -> HubSearchResponse:
     """Search HuggingFace Hub for models."""
@@ -63,6 +72,7 @@ async def search_hub(
 @router.get("/files/{repo_id:path}", response_model=HubFilesResponse)
 async def get_files(repo_id: str) -> HubFilesResponse:
     """Get files in a HuggingFace model repository."""
+    _validate_repo_id(repo_id)
     try:
         raw = await asyncio.to_thread(get_model_files, repo_id)
     except Exception as e:
@@ -80,6 +90,7 @@ async def get_files(repo_id: str) -> HubFilesResponse:
 @router.get("/config/{repo_id:path}", response_model=HubConfigResponse)
 async def get_config(repo_id: str) -> HubConfigResponse:
     """Fetch model configuration from HuggingFace."""
+    _validate_repo_id(repo_id)
     try:
         cfg = await asyncio.to_thread(fetch_hf_model_config, repo_id)
     except Exception as e:

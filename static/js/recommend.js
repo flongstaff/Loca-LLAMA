@@ -27,6 +27,11 @@ async function loadRecommendDropdowns() {
     });
 
     recBtn.addEventListener("click", runRecommend);
+
+    // Auto-detect hardware after dropdown is populated
+    const detectBtn = document.getElementById("rec-detect-hw-btn");
+    const feedbackEl = document.getElementById("rec-detect-hw-feedback");
+    detectHardware(hwSelect, detectBtn, feedbackEl);
   } catch (err) {
     console.error("Failed to load recommend dropdowns:", err);
     const container = document.getElementById("rec-results");

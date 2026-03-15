@@ -5,7 +5,27 @@
       "Bash(mv:*)",
       "Bash(.venv/bin/pip install:*)",
       "Bash(timeout 5 .venv/bin/uvicorn loca_llama.api.app:app:*)",
-      "Bash(.venv/bin/python:*)"
+      "Bash(.venv/bin/python:*)",
+      "Bash(pip3 list:*)",
+      "Bash(python3:*)",
+      "Bash(grep:*)",
+      "Bash(.venv/bin/pytest:*)",
+      "Bash(git commit:*)",
+      "Bash(git:*)",
+      "Bash(source:*)",
+      "Bash(/Users/flong/Developer/loca-llama/rpi/cli-webapp-improvements/implement/IMPLEMENT.md:*)",
+      "Bash(gh pr:*)",
+      "Bash(.venv/bin/uvicorn loca_llama.api.app:app:*)",
+      "Bash(lsof:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:paperswithcode.com)",
+      "WebFetch(domain:mlx-llm-benchmark.com)",
+      "WebFetch(domain:crfm.stanford.edu)"
     ]
+  },
+  "enabledPlugins": {
+    "superpowers@superpowers-marketplace": true,
+    "pr-review-toolkit@claude-plugins-official": true
   }
 }

@@ -39,6 +39,8 @@ async def scan_local(
             raw = await asyncio.to_thread(scan_custom_dir, custom_dir)
         else:
             raw = await asyncio.to_thread(scan_all)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Scanner error: %s", e)
         raise HTTPException(status_code=500, detail="Scan failed: check server logs for details")

@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { escapeHtml, tierToCssClass } from "./utils.js";
+import { escapeHtml, tierToCssClass, detectHardware } from "./utils.js";
 
 let compatResults = [];
 let compatSortCol = "tier";
@@ -51,6 +51,11 @@ async function loadCompatibilityDropdowns() {
     quantSelect.addEventListener("change", checkReady);
 
     analyzeBtn.addEventListener("click", runAnalysis);
+
+    // Auto-detect hardware after dropdowns are populated
+    const detectBtn = document.getElementById("detect-hw-btn");
+    const feedbackEl = document.getElementById("detect-hw-feedback");
+    detectHardware(hwSelect, detectBtn, feedbackEl);
   } catch (err) {
     console.error("Failed to load compatibility dropdowns:", err);
     const resultsEl = document.getElementById("compat-results");
