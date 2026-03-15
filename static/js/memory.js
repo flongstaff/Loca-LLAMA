@@ -101,8 +101,16 @@ function renderMemoryChart() {
   // Time labels
   const timestamps = memoryHistory.map((s) => s.timestamp);
   const formatTime = (ts) => {
-    const d = new Date(ts * 1000);
-    return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}:${d.getSeconds().toString().padStart(2, "0")}`;
+    let d;
+    if (typeof ts === "string") {
+      d = new Date(ts);
+    } else if (ts > 1e12) {
+      d = new Date(ts);
+    } else {
+      d = new Date(ts * 1000);
+    }
+    if (isNaN(d.getTime())) return "--:--:--";
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
   };
   drawTimeLabels(ctx, pad, w, h, timestamps, MAX_MEMORY_SLOTS, formatTime);
 }

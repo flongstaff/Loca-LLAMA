@@ -254,8 +254,8 @@ def scan_all() -> list[LocalModel]:
 
 def scan_custom_dir(directory: str) -> list[LocalModel]:
     """Scan a custom directory for model files."""
-    path = Path(directory).expanduser()
-    if not path.exists():
+    path = Path(directory).expanduser().resolve()
+    if not path.exists() or not path.is_dir():
         return []
 
     models: list[LocalModel] = []

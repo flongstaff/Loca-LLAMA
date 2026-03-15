@@ -37,6 +37,8 @@ async def estimate_vram(req: CalculatorEstimateRequest) -> CalculatorEstimateRes
         kv_cache = estimate_kv_cache_raw(
             req.num_layers, req.num_kv_heads, req.head_dim,
             req.context_length, req.kv_bits,
+            inference_mode=req.inference_mode,
+            model_size_gb=model_size,
         )
         overhead = estimate_overhead_gb(model_size)
         total = model_size + kv_cache + overhead

@@ -66,6 +66,7 @@ async function runEstimate() {
       parseFloat(document.getElementById("calc-context-range").value)
     ),
     kv_bits: parseInt(document.getElementById("calc-kv-bits").value, 10),
+    inference_mode: document.getElementById("calc-inference-mode").value,
   };
 
   // Basic client-side validation
@@ -201,6 +202,9 @@ export function initCalculator() {
 
   // KV bits select
   document.getElementById("calc-kv-bits").addEventListener("change", scheduleEstimate);
+
+  // Inference mode select
+  document.getElementById("calc-inference-mode").addEventListener("change", scheduleEstimate);
 
   // Re-render chart on theme change
   document.addEventListener("themechange", () => scheduleEstimate());

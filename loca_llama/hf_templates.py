@@ -15,6 +15,14 @@ from dataclasses import dataclass, field
 HF_RAW_URL = "https://huggingface.co/{repo_id}/raw/main/{filename}"
 HF_API_URL = "https://huggingface.co/api/models/{repo_id}"
 
+_REPO_ID_RE = re.compile(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$")
+
+
+def _validate_repo_id(repo_id: str) -> None:
+    """Raise ValueError if repo_id doesn't match the expected owner/repo format."""
+    if not _REPO_ID_RE.match(repo_id):
+        raise ValueError(f"repo_id must match pattern owner/repo (alphanumeric, dots, dashes, underscores), got {repo_id!r}")
+
 
 @dataclass
 class HFModelConfig:
@@ -285,6 +293,7 @@ def fetch_hf_model_config(
         fetch_card: Whether to also parse the model card (slower)
         progress_callback: Optional callback(step, total, description)
     """
+    _validate_repo_id(repo_id)
     result = HFModelConfig(repo_id=repo_id)
     total_steps = 5 if fetch_card else 4
 

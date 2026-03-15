@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ── Hardware ─────────────────────────────────────────────────────────────────
@@ -191,6 +191,7 @@ class CalculatorEstimateRequest(BaseModel):
     num_kv_heads: int = Field(..., ge=1, le=128)
     head_dim: int = Field(..., ge=32, le=512)
     kv_bits: Literal[4, 8, 16] = 16
+    inference_mode: Literal["streaming", "batch"] = "streaming"
 
 
 class HardwareCompatibilityItem(BaseModel):
@@ -274,6 +275,15 @@ class LlamaCppCommandRequest(BaseModel):
     context_length: int | None = None
     n_gpu_layers: int = -1
     sampling_overrides: dict[str, float | int] | None = None
+
+    @field_validator("model_path")
+    @classmethod
+    def reject_shell_metacharacters(cls, v: str) -> str:
+        _SHELL_METACHARS = set(';|&$`(){}[]<>\n\r')
+        bad = [c for c in v if c in _SHELL_METACHARS]
+        if bad:
+            raise ValueError(f"model_path contains disallowed characters: {bad}")
+        return v
 
 
 class LlamaCppCommandResponse(BaseModel):
@@ -373,8 +383,8 @@ class BenchmarkStartRequest(BaseModel):
     prompt_type: str = "default"
     num_runs: int = Field(default=3, ge=1, le=10)
     max_tokens: int = Field(default=200, ge=1, le=4096)
-    context_length: int = 4096
-    custom_prompt: str | None = None
+    context_length: int = Field(default=4096, ge=128, le=262144)
+    custom_prompt: str | None = Field(default=None, max_length=10000)
 
 
 class BenchmarkStartResponse(BaseModel):
@@ -402,6 +412,9 @@ class BenchmarkAggregate(BaseModel):
     avg_tok_per_sec: float = 0.0
     min_tok_per_sec: float = 0.0
     max_tok_per_sec: float = 0.0
+    median_tok_per_sec: float = 0.0
+    p95_tok_per_sec: float = 0.0
+    stddev_tok_per_sec: float = 0.0
     avg_prefill_tok_per_sec: float = 0.0
     avg_ttft_ms: float = 0.0
     avg_total_ms: float = 0.0
@@ -430,8 +443,8 @@ class SweepStartRequest(BaseModel):
     prompt_type: str = "default"
     num_runs: int = Field(default=3, ge=1, le=10)
     max_tokens: int = Field(default=200, ge=1, le=4096)
-    context_length: int = 4096
-    custom_prompt: str | None = None
+    context_length: int = Field(default=4096, ge=128, le=262144)
+    custom_prompt: str | None = Field(default=None, max_length=10000)
 
 
 class SweepComboResult(BaseModel):
@@ -456,6 +469,74 @@ class SweepStatusResponse(BaseModel):
 
 
 # ── Memory ───────────────────────────────────────────────────────────────────
+
+# ── Throughput ──────────────────────────────────────────────────────────────
+
+class ThroughputRequestResult(BaseModel):
+    request_id: int
+    success: bool
+    tokens_generated: int = 0
+    elapsed_ms: float = 0.0
+    tokens_per_second: float = 0.0
+    error: str | None = None
+
+
+class ThroughputStartRequest(BaseModel):
+    runtime_name: str
+    model_id: str
+    concurrency: int = Field(default=4, ge=1, le=32)
+    total_requests: int = Field(default=8, ge=1, le=100)
+    prompt: str = Field(
+        default="Write a brief explanation of how neural networks work.",
+        max_length=10000,
+    )
+    max_tokens: int = Field(default=100, ge=1, le=2048)
+
+
+class ThroughputResponse(BaseModel):
+    job_id: str
+    status: str
+    concurrency: int = 0
+    total_requests: int = 0
+    successful_requests: int = 0
+    failed_requests: int = 0
+    total_tokens: int = 0
+    elapsed_seconds: float = 0.0
+    throughput_tps: float = 0.0
+    avg_latency_ms: float = 0.0
+    min_latency_ms: float = 0.0
+    max_latency_ms: float = 0.0
+    error_rate: float = 0.0
+    per_request: list[ThroughputRequestResult] | None = None
+    error: str | None = None
+
+
+# ── Compare ─────────────────────────────────────────────────────────────────
+
+class CompareStartRequest(BaseModel):
+    runtime_a: str
+    runtime_b: str
+    model_id: str
+    prompt_type: str = "default"
+    num_runs: int = Field(default=3, ge=1, le=10)
+    max_tokens: int = Field(default=200, ge=1, le=4096)
+    context_length: int = Field(default=4096, ge=128, le=262144)
+    custom_prompt: str | None = Field(default=None, max_length=10000)
+
+
+class CompareResult(BaseModel):
+    runtime_name: str
+    aggregate: BenchmarkAggregate | None = None
+
+
+class CompareResponse(BaseModel):
+    job_id: str
+    status: str
+    results: list[CompareResult] | None = None
+    speedup_pct: float | None = None
+    faster_runtime: str | None = None
+    error: str | None = None
+
 
 class MemoryCurrentResponse(BaseModel):
     used_gb: float

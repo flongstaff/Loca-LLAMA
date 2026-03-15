@@ -16,5 +16,6 @@ def init_state(state: AppState) -> None:
 
 async def get_state() -> AppState:
     """FastAPI dependency that provides the shared AppState."""
-    assert _app_state is not None, "AppState not initialized"
+    if _app_state is None:
+        raise RuntimeError("Application state not initialized")
     return _app_state

@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Callable
 from .hardware import MacSpec
 from .models import LLMModel, MODELS
 from .quantization import QuantFormat, QUANT_FORMATS, RECOMMENDED_FORMATS
@@ -96,12 +97,18 @@ def estimate_kv_cache_raw(
     head_dim: int,
     context_length: int,
     kv_bits: int = 16,
+    inference_mode: str = "streaming",
+    model_size_gb: float = 0.0,
 ) -> float:
     """Estimate KV cache memory in GB from raw architecture parameters.
 
     Formula: 2 * num_layers * num_kv_heads * head_dim * context_length * (kv_bits/8)
 
     The factor of 2 accounts for both K and V caches.
+
+    In batch mode, adds activation overhead for processing full sequences
+    at once (adapted from llm-inference-calculator's incremental vs bulk
+    distinction).
     """
     bytes_per_element = kv_bits / 8
     kv_cache_bytes = (
@@ -112,7 +119,17 @@ def estimate_kv_cache_raw(
         * context_length
         * bytes_per_element
     )
-    return kv_cache_bytes / (1024**3)
+    kv_gb = kv_cache_bytes / (1024**3)
+
+    if inference_mode == "batch" and model_size_gb > 0:
+        # Batch mode: full activation storage needed for parallel sequence processing.
+        # Activation overhead scales with model size and context length.
+        activation_overhead = model_size_gb * 0.5 * (context_length / 2048)
+        # Cap at reasonable maximum (2x model size)
+        activation_overhead = min(activation_overhead, model_size_gb * 2.0)
+        kv_gb += activation_overhead
+
+    return kv_gb
 
 
 def estimate_kv_cache_gb(
@@ -320,7 +337,7 @@ def max_context_for_model(
 
 # ── Use-case filtering ──────────────────────────────────────────────────────
 
-USE_CASE_FILTERS: dict[str, callable] = {
+USE_CASE_FILTERS: dict[str, Callable] = {
     "coding": lambda m: m.family in ("Qwen", "CodeLlama", "StarCoder", "DeepSeek"),
     "reasoning": lambda m: "R1" in m.name or m.family in ("DeepSeek", "Qwen"),
     "small": lambda m: m.params_billion <= 8,

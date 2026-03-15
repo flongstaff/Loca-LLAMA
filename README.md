@@ -12,63 +12,130 @@ Loca-LLAMA analyzes your Apple Silicon Mac's specs (memory, bandwidth, GPU) and 
 - **Memory analysis** — Accurate estimates for model weights + KV cache + overhead
 - **Context length calculator** — Find the max context your hardware supports for any model
 - **Performance estimates** — Token generation speed based on memory bandwidth
+- **GPU & batch optimization** — Find optimal GPU layer allocation and batch sizes
 - **Local model scanner** — Auto-detect models from LM Studio, llama.cpp, HuggingFace cache, and MLX
 - **HuggingFace search** — Browse and search GGUF and MLX models online
-- **Benchmarks** — Compare LM Studio vs llama.cpp performance side-by-side
-- **Interactive UI** — Menu-driven terminal interface, or traditional CLI commands
-- **Zero dependencies** — Pure Python 3.11+, no pip installs needed
+- **Benchmarks** — Run inference benchmarks with batch size and context length sweeps
+- **Three interfaces** — CLI commands, interactive terminal UI, and a web dashboard
+- **Zero core dependencies** — Pure Python 3.11+, no pip installs needed for CLI/TUI
+
+## Prerequisites
+
+- **macOS** with Apple Silicon (M1, M2, M3, M4 series)
+- **Python 3.11+**
 
 ## Quick Start
 
 ```bash
-# Interactive mode (recommended)
-python -m loca_llama
-
-# Or install and use the CLI
 pip install -e .
-loca-llama-ui          # Interactive mode
-loca-llama check --hw "M4 Pro 48GB"   # CLI mode
+
+# Auto-detects your hardware
+loca-llama check
+
+# Or specify hardware explicitly
+loca-llama check --hw "M4 Pro 48GB"
+
+# Interactive terminal UI
+loca-llama-ui
+```
+
+## Installation
+
+```bash
+# Core CLI and TUI (no external dependencies)
+pip install -e .
+
+# With web interface (adds FastAPI + uvicorn)
+pip install -e ".[web]"
+
+# With dev tools (adds pytest, coverage, httpx)
+pip install -e ".[dev]"
 ```
 
 ## CLI Commands
 
-### Check which models fit your Mac
+Hardware is auto-detected on Apple Silicon Macs. Use `--hw "M4 Pro 48GB"` to specify manually.
+
+### Check model compatibility
 
 ```bash
-# Show all models that fit on M4 Pro 48GB at recommended quant levels
-loca-llama check --hw "M4 Pro 48GB"
+# Show all models that fit at recommended quant levels
+loca-llama check
 
 # Filter by model family
-loca-llama check --hw "M4 Pro 48GB" --family Llama
+loca-llama check --family Llama
 
 # Check specific quant formats
-loca-llama check --hw "M4 Pro 48GB" --quant Q4_K_M Q8_0
+loca-llama check --quant Q4_K_M Q8_0
 
 # Show everything including models that don't fit
-loca-llama check --hw "M4 Pro 48GB" --all
+loca-llama check --all
 
 # Check with a specific context length
-loca-llama check --hw "M4 Pro 48GB" --context 32768
+loca-llama check --context 32768
 ```
 
-### Detailed analysis of a specific model
+### Detailed model analysis
 
 ```bash
-loca-llama detail --hw "M4 Pro 48GB" --model "Llama 3.1 70B" --quant Q4_K_M
+loca-llama detail --model "Llama 3.1 70B" --quant Q4_K_M
 ```
 
 ### Find max context length
 
 ```bash
-loca-llama max-context --hw "M4 Pro 48GB" --model "Qwen 2.5 32B" --quant Q4_K_M
+loca-llama max-context --model "Qwen 2.5 32B" --quant Q4_K_M
 ```
 
 ### Get recommendations
 
 ```bash
-loca-llama recommend --hw "M4 Pro 48GB"
-loca-llama recommend --hw "M4 Pro 48GB" --use-case coding
-loca-llama recommend --hw "M4 Pro 48GB" --use-case reasoning
+loca-llama recommend
+loca-llama recommend --use-case coding
+loca-llama recommend --use-case reasoning
+```
+
+Use cases: `general`, `coding`, `reasoning`, `small`, `large-context`.
+
+### Calculate VRAM requirements
+
+```bash
+# For a known model
+loca-llama calc --model "Llama 3.1 70B" --quant Q4_K_M --context 8192
+
+# For a custom model
+loca-llama calc --params 13 --bpw 4.85 --context 4096 --layers 40 --kv-heads 8
+```
+
+### Scan for local models
+
+```bash
+loca-llama scan                  # Scan default locations
+loca-llama scan --dir ~/models   # Scan a custom directory
+```
+
+### GPU and batch optimization
+
+```bash
+# Optimal GPU layer allocation
+loca-llama gpu-optimize --model "Llama 3.1 70B"
+loca-llama gpu-optimize --model "Llama 3.1 70B" --compare   # Compare all quants
+
+# Optimal batch size for throughput
+loca-llama batch-optimize --model "Qwen 2.5 32B"
+loca-llama batch-optimize --model "Qwen 2.5 32B" --preference high  # Max throughput
+```
+
+### Run benchmarks
+
+```bash
+loca-llama benchmark --model "Llama 3.1 8B" --model-path /path/to/model.gguf
+```
+
+### Show memory status
+
+```bash
+loca-llama memory
 ```
 
 ### List available configs
@@ -79,15 +146,32 @@ loca-llama list-models    # All models in the database
 loca-llama list-quants    # Quantization format explanations
 ```
 
-## Interactive Mode
+## Interactive Terminal UI
 
-Run `python -m loca_llama` or `loca-llama-ui` to get the interactive menu:
+Run `loca-llama-ui` for a menu-driven terminal interface:
 
 1. **Check Model Compatibility** — See which models fit with colorized memory bars
 2. **Scan Local Models** — Find GGUF/MLX models already downloaded on your Mac
 3. **Search HuggingFace** — Browse and discover GGUF and MLX models
 4. **Detailed Model Analysis** — Deep dive: memory breakdown, context scaling table, speed estimates
 5. **Benchmark** — Run actual inference tests comparing LM Studio and llama.cpp
+
+## Web Interface
+
+The web dashboard provides a browser-based UI with tabs for compatibility analysis, model comparison, hardware specs, VRAM calculator, benchmarks, local model scanning, HuggingFace Hub search, memory monitoring, and recommendations.
+
+```bash
+# Install web dependencies
+pip install -e ".[web]"
+
+# Start the server
+loca-llama-web
+
+# Or run directly with uvicorn (with auto-reload for development)
+uvicorn loca_llama.api.app:app --reload
+```
+
+Then open [http://localhost:8000](http://localhost:8000) in your browser.
 
 ## How It Works
 
@@ -137,3 +221,10 @@ With 48GB unified memory (~44GB usable), you could run:
 ## License
 
 MIT
+
+---
+
+## Documentation
+
+- **[Testing Guide](docs/TESTING.md)** — How to run and contribute tests
+- **[Contributing](CONTRIBUTING.md)** — Development setup and contribution guidelines
