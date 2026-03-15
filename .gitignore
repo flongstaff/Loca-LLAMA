@@ -11,3 +11,32 @@ venv/
 .coverage
 .claude/settings.local.json
 rpi/
+.aider*
+
+# Personal documentation (not for public repo)
+PERSONAL/
+PERSONAL/*.md
+PERSONAL/*.csv
+!PERSONAL/.gitkeep
+
+# Personal notes in root (should be moved to PERSONAL/)
+AUDIT.md
+BATCH_SIZE_1024_GUIDE.md
+GPU_OPTIMIZATION_GUIDE.md
+INTEGRATION_GUIDE.md
+README_ENHANCED.md
+benchmark_results.md
+benchmark_results.csv
+
+# Benchmark results (local dev artifacts)
+quality_results.json
+user_benchmark_results.json
+
+# Local testing artifacts
+pytest-of-flong/
+
+# OS files
+.DS_Store
+
+# Planning folders (local development)
+.planning/

@@ -231,6 +231,87 @@ def build_parser() -> argparse.ArgumentParser:
     scan = sub.add_parser("scan", help="Scan for locally downloaded models")
     scan.add_argument("--dir", help="Custom directory to scan")
 
+    # ── gpu-optimize ──
+    gpu = sub.add_parser("gpu-optimize", help="Optimize GPU layer allocation and batch size")
+    gpu.add_argument("--model", help="Model name (substring match)")
+    gpu.add_argument("--quant", help="Quantization format (default: Q4_K_M)")
+    gpu.add_argument("--context", type=int, default=4096, help="Context length (default: 4096)")
+    gpu.add_argument("--compare", action="store_true", help="Compare all quantizations")
+
+    # ── batch-optimize ──
+    batch = sub.add_parser("batch-optimize", help="Optimize batch size for maximum throughput")
+    batch.add_argument("--model", help="Model name (substring match)")
+    batch.add_argument("--quant", help="Quantization format (default: Q4_K_M)")
+    batch.add_argument("--context", type=int, default=4096, help="Context length (default: 4096)")
+    batch.add_argument("--preference", choices=["high", "balanced", "low"], default="balanced",
+                       help="Batch preference: high (max throughput), balanced, low (memory efficient)")
+    batch.add_argument("--batch-sizes", nargs="+", help="Specific batch sizes to test")
+
+    # ── benchmark ──
+    bench = sub.add_parser("benchmark", help="Run benchmark tests")
+    bench.add_argument("--model", required=True, help="Model name")
+    bench.add_argument("--model-path", help="Path to GGUF file (overrides model name)")
+    bench.add_argument("--quant", help="Quantization format")
+    bench.add_argument("--batch-sizes", nargs="+", type=int, default=[256, 512, 1024, 2048],
+                       help="Batch sizes to test")
+    bench.add_argument("--context-lengths", nargs="+", type=int, default=[512, 1024, 2048],
+                       help="Context lengths to test")
+    bench.add_argument("--gpu-layers", type=int, default=-1, help="GPU layers (-1 = auto)")
+    bench.add_argument("--runs", type=int, default=3, help="Number of runs per config")
+
+    # ── quality ──
+    quality = sub.add_parser("quality", help="Run quality benchmark (coding tasks)")
+    quality.add_argument("--model", help="Test a specific model by ID")
+    quality.add_argument("--compare", choices=["pi", "claude"], help="Compare local vs cloud provider")
+    quality.add_argument("--runtime", help="Runtime to use (auto-detected if omitted)")
+
+    # ── speed ──
+    speed = sub.add_parser("speed", help="Run speed benchmark")
+    speed.add_argument("--model", help="Model ID (auto-detected if omitted)")
+    speed.add_argument("--runs", type=int, default=3, help="Number of runs (default: 3)")
+    speed.add_argument("--prompt", choices=["default", "coding", "reasoning", "creative", "json"],
+                       default="default", help="Prompt type (default: default)")
+    speed.add_argument("--sweep", action="store_true", help="Benchmark all loaded models")
+    speed.add_argument("--runtime", help="Runtime to use (auto-detected if omitted)")
+
+    # ── monitor ──
+    monitor = sub.add_parser("monitor", help="Proxy monitor for OpenCode sessions")
+    monitor.add_argument("--listen", type=int, default=1240, help="Listen port (default: 1240)")
+    monitor.add_argument("--target", type=int, default=1234, help="Target LLM server port (default: 1234)")
+
+    # ── results ──
+    results = sub.add_parser("results", help="View saved benchmark results")
+    results.add_argument("--model", help="Filter by model name")
+    results.add_argument("--type", choices=["speed", "quality", "monitor", "eval"], help="Filter by type")
+    results.add_argument("--compare", action="store_true", help="Side-by-side latest per model")
+    results.add_argument("--limit", type=int, default=30, help="Max results to show (default: 30)")
+    results.add_argument("--export", choices=["csv", "html", "md"], help="Export format")
+    results.add_argument("--output", help="Output file path for export")
+
+    # ── throughput ──
+    tp = sub.add_parser("throughput", help="Concurrent throughput test")
+    tp.add_argument("--model", help="Model ID (auto-detected if omitted)")
+    tp.add_argument("--concurrency", type=int, default=4, help="Concurrent requests (default: 4)")
+    tp.add_argument("--requests", type=int, default=8, help="Total requests (default: 8)")
+    tp.add_argument("--max-tokens", type=int, default=100, help="Max tokens per request (default: 100)")
+    tp.add_argument("--runtime", help="Runtime to use (auto-detected if omitted)")
+
+    # ── fetch-config ──
+    fc = sub.add_parser("fetch-config", help="Fetch model config from HuggingFace")
+    fc.add_argument("repo", help="HuggingFace repo ID (e.g. Qwen/Qwen2.5-72B)")
+    fc.add_argument("--calc", action="store_true", help="Auto-run VRAM calc with fetched config")
+    fc.add_argument("--quant", default="Q4_K_M", help="Quantization for calc (default: Q4_K_M)")
+    fc.add_argument("--context", type=int, default=4096, help="Context for calc (default: 4096)")
+
+    # ── eval ──
+    ev = sub.add_parser("eval", help="Run standard LLM evaluation benchmarks")
+    ev.add_argument("--bench", nargs="+",
+                    choices=["gsm8k", "arc", "hellaswag", "ifeval", "humaneval", "mmlu", "all"],
+                    default=["all"], help="Benchmarks to run (default: all)")
+    ev.add_argument("--model", help="Model ID (auto-detected if omitted)")
+    ev.add_argument("--samples", type=int, help="Max samples per benchmark (for quick runs)")
+    ev.add_argument("--runtime", help="Runtime to use (auto-detected if omitted)")
+
     return parser
 
 
@@ -594,6 +675,748 @@ def cmd_scan(args) -> None:
         )
 
 
+def cmd_gpu_optimize(args) -> None:
+    from .hardware import detect_mac
+    from .gpu_optimizer import optimize_for_hardware, compare_quantizations
+
+    # Detect hardware
+    detected = detect_mac()
+    if detected is None:
+        print(f"{RED}Could not detect Mac hardware.{RESET}")
+        sys.exit(1)
+    mac_key, mac = detected
+
+    # Find model
+    model = None
+    if args.model:
+        for m in MODELS:
+            if args.model.lower() in m.name.lower():
+                model = m
+                break
+        if not model:
+            print(f"{RED}Model '{args.model}' not found in database.{RESET}")
+            print("Available models:")
+            for m in MODELS:
+                print(f"  - {m.name}")
+            sys.exit(1)
+    else:
+        print(f"{YELLOW}No model specified. Use --model to select one.{RESET}")
+        sys.exit(1)
+
+    # Find quantization
+    quant = None
+    if args.quant:
+        if args.quant in QUANT_FORMATS:
+            quant = QUANT_FORMATS[args.quant]
+        else:
+            print(f"{RED}Quantization '{args.quant}' not found.{RESET}")
+            print(f"Available: {', '.join(QUANT_FORMATS.keys())}")
+            sys.exit(1)
+    else:
+        # Default to Q4_K_M
+        quant = QUANT_FORMATS["Q4_K_M"]
+
+    print_header(f"GPU Optimization — {model.name} @ {quant.name}")
+    print_hw_summary(mac)
+    print(f"  {BOLD}Model:{RESET}      {model.name}")
+    print(f"  {BOLD}Parameters:{RESET}  {model.params_billion:.1f}B")
+    print(f"  {BOLD}Layers:{RESET}      {model.num_layers}")
+    print(f"  {BOLD}Context:{RESET}     {format_context(args.context)}")
+    print()
+
+    if args.compare:
+        # Compare all quantizations
+        print(f"  {BOLD}Comparing Quantizations:{RESET}\n")
+        results = compare_quantizations(mac, model, args.context)
+
+        print(f"  {'Quant':<10} {'Size':>8} {'GPU Layers':>12} {'Offload':>10} {'Tok/s':>10} {'Recommendation'}")
+        print(f"  {'-' * 70}")
+
+        for r in results:
+            rec = r.recommendation
+            rec_color = GREEN if r.offload_percentage == 0 else YELLOW
+            print(
+                f"  {r.model_size_gb:>7.1f}GB  {r.gpu_layers:>12}/{model.num_layers}  "
+                f"{RED if r.offload_percentage > 50 else GREEN}{r.offload_percentage:>9.0f}%{RESET}  "
+                f"{format_tok_s(r.estimated_tokens_per_second):>10}  {rec_color}{rec}{RESET}"
+            )
+
+        print()
+        best = results[0]
+        print(f"  {BOLD}Best Option:{RESET} {best.model_size_gb:.1f}GB @ {best.offload_percentage:.0f}% offload")
+        print(f"  {BOLD}Recommended Settings:{RESET}")
+        print(f"    GPU Layers: {best.gpu_layers}")
+        print(f"    Batch Size: {best.batch_size}")
+        print(f"    Context: {best.context_length}")
+    else:
+        # Single optimization
+        result = optimize_for_hardware(mac, model, quant, args.context)
+
+        print(f"  {BOLD}Optimal Settings:{RESET}\n")
+        print(f"    {BOLD}GPU Layers:{RESET}   {result.gpu_layers}/{model.num_layers}")
+        print(f"    {BOLD}Batch Size:{RESET}   {result.batch_size}")
+        print(f"    {BOLD}Context:{RESET}      {result.context_length}")
+        print()
+
+        print(f"  {BOLD}Memory Usage:{RESET}\n")
+        print(f"    Model weights:  {format_size(result.model_size_gb)}")
+        print(f"    KV cache:       {format_size(result.kv_cache_gb)}")
+        print(f"    Total:          {format_size(result.total_memory_gb)}")
+        print(f"    GPU memory:     {format_size(result.gpu_memory_gb)}")
+        print(f"    System memory:  {format_size(result.system_memory_gb)}")
+        print()
+
+        print(f"  {BOLD}Performance:{RESET}\n")
+        print(f"    Offload:        {result.offload_percentage:.0f}% on CPU")
+        print(f"    Estimated:      {format_tok_s(result.estimated_tokens_per_second)}")
+        print(f"    Latency:        {result.estimated_latency_ms:.0f}ms/token")
+        print()
+
+        print(f"  {BOLD}Recommendation:{RESET} {BOLD}{result.recommendation}{RESET}\n")
+        for note in result.notes:
+            print(f"    • {note}")
+
+
+def cmd_batch_optimize(args) -> None:
+    from .hardware import detect_mac
+    from .batch_optimizer import optimize_for_batch_preference, compare_batch_sizes
+
+    # Detect hardware
+    detected = detect_mac()
+    if detected is None:
+        print(f"{RED}Could not detect Mac hardware.{RESET}")
+        sys.exit(1)
+    mac_key, mac = detected
+
+    # Find model
+    model = None
+    if args.model:
+        for m in MODELS:
+            if args.model.lower() in m.name.lower():
+                model = m
+                break
+        if not model:
+            print(f"{RED}Model '{args.model}' not found in database.{RESET}")
+            sys.exit(1)
+    else:
+        print(f"{YELLOW}No model specified. Use --model to select one.{RESET}")
+        sys.exit(1)
+
+    # Find quantization
+    quant = QUANT_FORMATS.get(args.quant, QUANT_FORMATS["Q4_K_M"]) if args.quant else QUANT_FORMATS["Q4_K_M"]
+
+    print_header(f"Batch Optimization — {model.name} @ {quant.name}")
+    print_hw_summary(mac)
+    print(f"  {BOLD}Model:{RESET}      {model.name}")
+    print(f"  {BOLD}Parameters:{RESET}  {model.params_billion:.1f}B")
+    print(f"  {BOLD}Layers:{RESET}      {model.num_layers}")
+    print(f"  {BOLD}Context:{RESET}     {format_context(args.context)}")
+    print(f"  {BOLD}Preference:{RESET}  {args.preference.upper()}")
+    print()
+
+    if args.batch_sizes:
+        # Test specific batch sizes
+        results = compare_batch_sizes(
+            mac, model, quant, args.context,
+            batch_sizes=[int(b) for b in args.batch_sizes]
+        )
+
+        print(f"  {'Batch':>8} {'Throughput':>12} {'Memory':>10} {'Efficiency':>12} {'Recommendation'}")
+        print(f"  {'-' * 60}")
+
+        for r in results:
+            eff_color = GREEN if r.memory_efficiency > 0.7 else YELLOW
+            print(
+                f"  {r.batch_size:>8}  {r.estimated_throughput_tok_s:>11.1f} tok/s  "
+                f"{format_size(r.total_memory_gb):>8}  {eff_color}{r.memory_efficiency:>11.0%}{RESET}  "
+                f"{r.recommendation}"
+            )
+
+        print()
+        best = results[0]
+        print(f"  {BOLD}Best Batch Size:{RESET} {best.batch_size} @ {best.estimated_throughput_tok_s:.1f} tok/s")
+    else:
+        # Auto-optimize
+        result = optimize_for_batch_preference(
+            mac, model, quant, args.preference, args.context
+        )
+
+        print(f"  {BOLD}Optimal Settings:{RESET}\n")
+        print(f"    {BOLD}Batch Size:{RESET}    {result.batch_size}")
+        print(f"    {BOLD}Context:{RESET}       {result.context_length}")
+        print(f"    {BOLD}GPU Layers:{RESET}    {result.gpu_layers}")
+        print(f"    {BOLD}UBatch:{RESET}        {result.ubatch_size}")
+        print()
+
+        print(f"  {BOLD}Memory Usage:{RESET}\n")
+        print(f"    Total:        {format_size(result.total_memory_gb)}")
+        print(f"    GPU:          {format_size(result.gpu_memory_gb)}")
+        print(f"    System:       {format_size(result.system_memory_gb)}")
+        print(f"    Headroom:     {format_size(result.headroom_gb)}")
+        print()
+
+        print(f"  {BOLD}Performance:{RESET}\n")
+        print(f"    Throughput:   {result.estimated_throughput_tok_s:.1f} tok/s")
+        print(f"    Latency:      {result.estimated_latency_ms:.0f}ms/token")
+        print(f"    Efficiency:   {result.memory_efficiency:.0%}")
+        print()
+
+        print(f"  {BOLD}Recommendation:{RESET} {BOLD}{result.recommendation}{RESET}\n")
+        for note in result.notes:
+            print(f"    • {note}")
+
+
+def cmd_benchmark(args) -> None:
+    from .hardware import detect_mac
+    from .benchmark_suite import run_full_benchmark_suite, BenchmarkConfig
+
+    # Detect hardware
+    detected = detect_mac()
+    if detected is None:
+        print(f"{RED}Could not detect Mac hardware.{RESET}")
+        sys.exit(1)
+    mac_key, mac = detected
+
+    # Find model path
+    model_path = None
+    if args.model_path:
+        model_path = args.model_path
+    elif args.model:
+        # Try to find model in common locations
+        from pathlib import Path
+        model_name = args.model.lower().replace(" ", "_").replace("-", "_")
+        lmstudio_models = Path.home() / ".lmstudio" / "models"
+        common_paths = [
+            str(lmstudio_models / "*" / f"{model_name}*.gguf"),
+        ]
+
+        import glob
+        for pattern in common_paths:
+            matches = glob.glob(pattern)
+            if matches:
+                model_path = matches[0]
+                break
+
+        if not model_path:
+            print(f"{RED}Model not found. Use --model-path to specify GGUF file.{RESET}")
+            sys.exit(1)
+    else:
+        print(f"{RED}Please specify --model or --model-path.{RESET}")
+        sys.exit(1)
+
+    print_header(f"Benchmark — {model_path.split('/')[-1]}")
+    print_hw_summary(mac)
+    print(f"  {BOLD}Model:{RESET}    {model_path.split('/')[-1]}")
+    print(f"  {BOLD}GPU Layers:{RESET} {args.gpu_layers}")
+    print(f"  {BOLD}Batch Sizes:{RESET} {args.batch_sizes}")
+    print(f"  {BOLD}Contexts:{RESET}  {args.context_lengths}")
+    print(f"  {BOLD}Runs:{RESET}       {args.runs}")
+    print()
+
+    print(f"{BOLD}Running benchmark suite...{RESET}\n")
+
+    try:
+        results = run_full_benchmark_suite(
+            model_path,
+            gpu_layers=args.gpu_layers,
+            batch_sizes=args.batch_sizes,
+            context_lengths=args.context_lengths,
+            num_runs=args.runs,
+        )
+
+        # Print batch size sweep results
+        print(f"{BOLD}Batch Size Sweep Results:{RESET}\n")
+        batch_sweep = results[0]
+        print(f"  {'Batch':>8} {'TTFT':>10} {'Throughput':>12} {'Success'}")
+        print(f"  {'-' * 50}")
+
+        for r in batch_sweep.results:
+            status = "✅" if r.success else "❌"
+            ttft = f"{r.time_to_first_token_ms:.0f}ms" if r.success else "N/A"
+            tps = f"{r.tokens_per_second:.1f}" if r.success else "N/A"
+            print(f"  {r.batch_size:>8}  {ttft:>10}  {tps:>12}  {status}")
+
+        print()
+
+        # Print context length sweep results
+        print(f"{BOLD}Context Length Sweep Results:{RESET}\n")
+        context_sweep = results[1]
+        print(f"  {'Context':>10} {'TTFT':>10} {'Throughput':>12} {'Success'}")
+        print(f"  {'-' * 50}")
+
+        for r in context_sweep.results:
+            status = "✅" if r.success else "❌"
+            ttft = f"{r.time_to_first_token_ms:.0f}ms" if r.success else "N/A"
+            tps = f"{r.tokens_per_second:.1f}" if r.success else "N/A"
+            print(f"  {r.context_length:>10}  {ttft:>10}  {tps:>12}  {status}")
+
+        print()
+
+        # Summary
+        if batch_sweep.best_result:
+            print(f"{BOLD}Best Configuration:{RESET}")
+            print(f"  Batch Size: {batch_sweep.best_result.batch_size}")
+            print(f"  Throughput: {batch_sweep.best_result.tokens_per_second:.1f} tok/s")
+            print(f"  TTFT: {batch_sweep.best_result.time_to_first_token_ms:.0f}ms")
+
+    except Exception as e:
+        print(f"{RED}Benchmark failed: {e}{RESET}")
+
+
+def _find_runtime(preferred: str | None = None) -> "RuntimeInfo | None":
+    """Auto-detect a running LLM runtime, or use the one specified."""
+    from .benchmark import detect_all_runtimes, RuntimeInfo
+
+    runtimes = detect_all_runtimes()
+    if not runtimes:
+        print(f"{RED}No LLM runtime detected. Start LM Studio, oMLX, or llama.cpp server.{RESET}")
+        return None
+
+    if preferred:
+        for rt in runtimes:
+            if preferred.lower() in rt.name.lower():
+                return rt
+        print(f"{YELLOW}Runtime '{preferred}' not found. Available: {', '.join(r.name for r in runtimes)}{RESET}")
+
+    # Return first detected
+    rt = runtimes[0]
+    print(f"{GREEN}Using runtime: {rt.name} ({rt.url}){RESET}", file=sys.stderr)
+    return rt
+
+
+def cmd_quality(args) -> None:
+    from .quality_bench import (
+        run_quality_benchmark, run_quality_comparison,
+        get_models_from_api, print_quality_summary,
+        results_to_record,
+    )
+    from .benchmark_results import save_result
+
+    rt = _find_runtime(getattr(args, "runtime", None))
+    if not rt:
+        sys.exit(1)
+
+    if args.model:
+        models = [args.model]
+    else:
+        models = get_models_from_api(rt.url, rt.api_key)
+        if not models:
+            models = rt.models
+        if not models:
+            print(f"{RED}No models found on {rt.name}.{RESET}")
+            sys.exit(1)
+        print(f"Models found: {len(models)}")
+        for m in models:
+            print(f"  - {m}")
+
+    if args.compare:
+        if len(models) != 1:
+            if len(models) > 1:
+                print(f"{YELLOW}--compare requires a single model. Use --model to pick one.{RESET}")
+                sys.exit(1)
+            sys.exit(1)
+
+        local_results, cloud_results = run_quality_comparison(
+            rt.url, models[0], args.compare, local_api_key=rt.api_key,
+        )
+
+        print("\n--- LOCAL RESULTS ---")
+        print_quality_summary(local_results)
+        print("\n--- CLOUD RESULTS ---")
+        print_quality_summary(cloud_results)
+
+        record = results_to_record(
+            local_results, rt.name,
+            cloud_provider=args.compare, cloud_results=cloud_results,
+        )
+        path = save_result(record)
+        print(f"\nResults saved to {path}")
+    else:
+        results = run_quality_benchmark(rt.url, models, api_key=rt.api_key, runtime_name=rt.name)
+        print_quality_summary(results)
+
+        # Save each model's results
+        for model in set(r.model for r in results):
+            model_results = [r for r in results if r.model == model]
+            record = results_to_record(model_results, rt.name)
+            path = save_result(record)
+            print(f"Results saved to {path}")
+
+
+def cmd_speed(args) -> None:
+    from .benchmark import (
+        run_benchmark_suite, run_benchmark_sweep,
+        aggregate_results, BENCH_PROMPTS,
+    )
+    from .benchmark_results import BenchmarkRecord, save_result
+
+    rt = _find_runtime(getattr(args, "runtime", None))
+    if not rt:
+        sys.exit(1)
+
+    if args.model:
+        model_ids = [args.model]
+    elif args.sweep:
+        model_ids = rt.models
+        if not model_ids:
+            print(f"{RED}No models found on {rt.name}.{RESET}")
+            sys.exit(1)
+    else:
+        model_ids = rt.models[:1]
+        if not model_ids:
+            print(f"{RED}No models found on {rt.name}.{RESET}")
+            sys.exit(1)
+
+    print_header("Speed Benchmark")
+    print(f"  {BOLD}Runtime:{RESET}  {rt.name} ({rt.url})")
+    print(f"  {BOLD}Models:{RESET}   {', '.join(model_ids)}")
+    print(f"  {BOLD}Runs:{RESET}     {args.runs}")
+    print(f"  {BOLD}Prompt:{RESET}   {args.prompt}")
+    print()
+
+    def progress(run: int, total: int) -> None:
+        print(f"    Run {run}/{total}...", end=" ", flush=True)
+
+    if args.sweep and len(model_ids) > 1:
+        sweep_results = run_benchmark_sweep(
+            rt, model_ids, args.prompt, args.runs,
+            run_callback=progress,
+        )
+        for entry in sweep_results:
+            model_id = entry["model_id"]
+            agg = entry["aggregate"]
+            if agg.get("success"):
+                print(f"\n  {BOLD}{model_id}{RESET}")
+                print(f"    {agg['avg_tok_per_sec']:.1f} tok/s (median: {agg['median_tok_per_sec']:.1f})")
+                print(f"    TTFT: {agg['avg_ttft_ms']:.0f}ms")
+
+                record = BenchmarkRecord(
+                    type="speed", model=model_id, runtime=rt.name,
+                    tokens_per_second=agg["avg_tok_per_sec"],
+                    ttft_ms=agg["avg_ttft_ms"],
+                    total_time_ms=agg["avg_total_ms"],
+                    generated_tokens=agg["total_tokens_generated"],
+                    extra={"median_tps": agg["median_tok_per_sec"], "runs": agg["runs"]},
+                )
+                save_result(record)
+            else:
+                print(f"\n  {RED}{model_id}: benchmark failed{RESET}")
+    else:
+        for model_id in model_ids:
+            results = run_benchmark_suite(
+                rt, model_id, args.prompt, args.runs,
+                progress_callback=progress,
+            )
+            agg = aggregate_results(results)
+
+            if agg.get("success"):
+                print(f"\n  {BOLD}Results for {model_id}:{RESET}")
+                print(f"    Avg: {agg['avg_tok_per_sec']:.1f} tok/s")
+                print(f"    Median: {agg['median_tok_per_sec']:.1f} tok/s")
+                print(f"    P95: {agg['p95_tok_per_sec']:.1f} tok/s")
+                print(f"    Min/Max: {agg['min_tok_per_sec']:.1f} / {agg['max_tok_per_sec']:.1f}")
+                stddev = agg.get('stddev_tok_per_sec', 0)
+                if stddev:
+                    print(f"    Std Dev: {stddev:.1f}")
+                print(f"    Prefill: {agg['avg_prefill_tok_per_sec']:.1f} tok/s")
+                print(f"    TTFT: {agg['avg_ttft_ms']:.0f}ms")
+                print(f"    Runs: {agg['runs']}")
+
+                record = BenchmarkRecord(
+                    type="speed", model=model_id, runtime=rt.name,
+                    tokens_per_second=agg["avg_tok_per_sec"],
+                    ttft_ms=agg["avg_ttft_ms"],
+                    total_time_ms=agg["avg_total_ms"],
+                    generated_tokens=agg["total_tokens_generated"],
+                    extra={
+                        "median_tps": agg["median_tok_per_sec"],
+                        "p95_tps": agg["p95_tok_per_sec"],
+                        "stddev_tps": agg.get("stddev_tok_per_sec", 0),
+                        "prefill_tps": agg["avg_prefill_tok_per_sec"],
+                        "runs": agg["runs"],
+                    },
+                )
+                path = save_result(record)
+                print(f"    Saved to {path}")
+            else:
+                print(f"\n  {RED}Benchmark failed for {model_id}{RESET}")
+                for r in results:
+                    if r.error:
+                        print(f"    {r.error}")
+                        break
+
+
+def cmd_monitor(args) -> None:
+    from .proxy_monitor import run_proxy
+
+    run_proxy(listen_port=args.listen, target_port=args.target)
+
+
+def cmd_results(args) -> None:
+    from .benchmark_results import load_results, print_results_table, print_comparison_table
+
+    records = load_results(
+        type_filter=getattr(args, "type", None),
+        model_filter=args.model,
+        limit=args.limit,
+    )
+
+    export_fmt = getattr(args, "export", None)
+    if export_fmt:
+        _export_results(records, export_fmt, getattr(args, "output", None))
+        return
+
+    if args.compare:
+        print_comparison_table(records)
+    else:
+        print_results_table(records)
+
+
+def _export_results(records: list, fmt: str, output_path: str | None) -> None:
+    """Export results to CSV, HTML, or Markdown."""
+    from .benchmark_results import BenchmarkRecord, RESULTS_DIR
+
+    if not records:
+        print(f"{RED}No results to export.{RESET}")
+        return
+
+    if fmt == "csv":
+        import csv as csv_mod
+        path = output_path or str(RESULTS_DIR / "results_export.csv")
+        with open(path, "w", newline="") as f:
+            writer = csv_mod.DictWriter(f, fieldnames=[
+                "type", "model", "runtime", "timestamp", "tokens_per_second",
+                "ttft_ms", "total_time_ms", "hardware",
+            ])
+            writer.writeheader()
+            for r in records:
+                writer.writerow({
+                    "type": r.type, "model": r.model, "runtime": r.runtime,
+                    "timestamp": r.timestamp, "tokens_per_second": r.tokens_per_second,
+                    "ttft_ms": r.ttft_ms, "total_time_ms": r.total_time_ms,
+                    "hardware": r.hardware,
+                })
+        print(f"Exported {len(records)} results to {path}")
+
+    elif fmt == "html":
+        from .benchmark_report import generate_html_report
+        import time as time_mod
+        # Build a results dict compatible with generate_html_report
+        runs = []
+        for r in records:
+            runs.append({
+                "run_number": len(runs) + 1,
+                "success": r.tokens_per_second > 0 or r.type == "quality",
+                "tokens_per_second": r.tokens_per_second,
+                "prompt_tokens_per_second": 0,
+                "time_to_first_token_ms": r.ttft_ms,
+                "total_time_ms": r.total_time_ms,
+                "generated_tokens": r.generated_tokens,
+            })
+        html_str = generate_html_report(
+            {"runs": runs, "aggregate": {}},
+            metadata={
+                "title": "Loca-LLAMA Results Export",
+                "model": records[0].model if records else "—",
+                "runtime": records[0].runtime if records else "—",
+                "timestamp": time_mod.strftime("%Y-%m-%d %H:%M"),
+            },
+        )
+        path = output_path or str(RESULTS_DIR / "results_export.html")
+        from pathlib import Path
+        Path(path).write_text(html_str)
+        print(f"Exported HTML report to {path}")
+
+    elif fmt == "md":
+        lines = ["# Loca-LLAMA Results", ""]
+        lines.append(f"| Type | Model | TPS | TTFT | Runtime |")
+        lines.append("|------|-------|-----|------|---------|")
+        for r in records:
+            tps = f"{r.tokens_per_second:.1f}" if r.tokens_per_second else "—"
+            ttft = f"{r.ttft_ms:.0f}ms" if r.ttft_ms else "—"
+            lines.append(f"| {r.type} | {r.model} | {tps} | {ttft} | {r.runtime} |")
+        path = output_path or str(RESULTS_DIR / "results_export.md")
+        from pathlib import Path
+        Path(path).write_text("\n".join(lines))
+        print(f"Exported Markdown to {path}")
+
+
+def cmd_throughput(args) -> None:
+    from .throughput import run_throughput_test
+    from .benchmark_results import BenchmarkRecord, save_result
+
+    rt = _find_runtime(getattr(args, "runtime", None))
+    if not rt:
+        sys.exit(1)
+
+    model_id = args.model or (rt.models[0] if rt.models else None)
+    if not model_id:
+        print(f"{RED}No model found. Use --model to specify.{RESET}")
+        sys.exit(1)
+
+    print_header("Concurrent Throughput Test")
+    print(f"  {BOLD}Runtime:{RESET}      {rt.name} ({rt.url})")
+    print(f"  {BOLD}Model:{RESET}        {model_id}")
+    print(f"  {BOLD}Concurrency:{RESET}  {args.concurrency}")
+    print(f"  {BOLD}Requests:{RESET}     {args.requests}")
+    print(f"  {BOLD}Max tokens:{RESET}   {args.max_tokens}")
+    print()
+
+    def progress(done: int, total: int) -> None:
+        print(f"  Request {done}/{total} complete", flush=True)
+
+    result = run_throughput_test(
+        base_url=rt.url,
+        model_id=model_id,
+        concurrency=args.concurrency,
+        total_requests=args.requests,
+        max_tokens=args.max_tokens,
+        api_key=rt.api_key,
+        progress_callback=progress,
+    )
+
+    print(f"\n  {BOLD}Results:{RESET}")
+    print(f"    Throughput:   {GREEN}{result.throughput_tps:.1f} tok/s{RESET} (aggregate)")
+    print(f"    Successful:   {result.successful_requests}/{result.total_requests}")
+    print(f"    Avg latency:  {result.avg_latency_ms:.0f}ms")
+    print(f"    Min/Max:      {result.min_latency_ms:.0f}ms / {result.max_latency_ms:.0f}ms")
+    print(f"    Total tokens: {result.total_tokens}")
+    print(f"    Wall clock:   {result.elapsed_seconds:.1f}s")
+    if result.error_rate > 0:
+        print(f"    {RED}Error rate:   {result.error_rate:.0%}{RESET}")
+
+    record = BenchmarkRecord(
+        type="speed", model=model_id, runtime=rt.name,
+        tokens_per_second=result.throughput_tps,
+        generated_tokens=result.total_tokens,
+        total_time_ms=result.elapsed_seconds * 1000,
+        extra={
+            "test_type": "throughput",
+            "concurrency": args.concurrency,
+            "total_requests": args.requests,
+            "avg_latency_ms": result.avg_latency_ms,
+            "error_rate": result.error_rate,
+        },
+    )
+    path = save_result(record)
+    print(f"\n  Saved to {path}")
+
+
+def cmd_fetch_config(args) -> None:
+    from .hf_templates import fetch_hf_model_config
+
+    print(f"  Fetching config from HuggingFace: {args.repo}...")
+
+    try:
+        config = fetch_hf_model_config(args.repo)
+    except ValueError as e:
+        print(f"{RED}{e}{RESET}")
+        sys.exit(1)
+
+    print_header(f"HuggingFace Model Config — {args.repo}")
+    print(f"  {BOLD}Architecture:{RESET}  {config.architecture or '—'}")
+    print(f"  {BOLD}Model type:{RESET}    {config.model_type or '—'}")
+    print(f"  {BOLD}Layers:{RESET}        {config.num_layers}")
+    print(f"  {BOLD}Attn heads:{RESET}    {config.num_attention_heads}")
+    print(f"  {BOLD}KV heads:{RESET}      {config.num_kv_heads}")
+    print(f"  {BOLD}Head dim:{RESET}      {config.head_dim}")
+    print(f"  {BOLD}Hidden size:{RESET}   {config.hidden_size}")
+    print(f"  {BOLD}Vocab size:{RESET}    {config.vocab_size}")
+    print(f"  {BOLD}Max context:{RESET}   {config.max_position_embeddings}")
+    if config.temperature is not None:
+        print(f"  {BOLD}Temperature:{RESET}  {config.temperature}")
+    if config.top_p is not None:
+        print(f"  {BOLD}Top P:{RESET}        {config.top_p}")
+    if config.license:
+        print(f"  {BOLD}License:{RESET}      {config.license}")
+
+    if args.calc and config.num_layers:
+        # Estimate parameter count from architecture
+        # hidden_size^2 * num_layers * 12 / 1e9 (rough MLP+attn estimate)
+        est_params_b = (config.hidden_size ** 2 * config.num_layers * 12) / 1e9
+        quant = args.quant
+        if quant not in QUANT_FORMATS:
+            print(f"{RED}Unknown quant: {quant}{RESET}")
+            return
+
+        bpw = QUANT_FORMATS[quant].bits_per_weight
+        model_size = estimate_model_size_gb(est_params_b, bpw)
+        kv_cache = estimate_kv_cache_raw(
+            config.num_layers, config.num_kv_heads, config.head_dim, args.context,
+        )
+        overhead = estimate_overhead_gb(model_size)
+        total = model_size + kv_cache + overhead
+
+        print(f"\n  {BOLD}VRAM Estimate @ {quant} ({args.context} ctx):{RESET}")
+        print(f"    Est. params:    ~{est_params_b:.1f}B")
+        print(f"    Model weights:  {format_size(model_size)}")
+        print(f"    KV cache:       {format_size(kv_cache)}")
+        print(f"    Overhead:       {format_size(overhead)}")
+        print(f"    {BOLD}Total:          {format_size(total)}{RESET}")
+
+        mac = resolve_hw_or_detect(None)
+        if mac:
+            avail = mac.usable_memory_gb
+            print(f"    {BOLD}Available:{RESET}      {format_size(avail)}")
+            print(f"    {BOLD}Usage:{RESET}          {bar(total, avail)}")
+
+
+def cmd_eval(args) -> None:
+    from .eval_benchmarks import run_eval_suite
+
+    rt = _find_runtime(getattr(args, "runtime", None))
+    if not rt:
+        sys.exit(1)
+
+    model_id = args.model or (rt.models[0] if rt.models else None)
+    if not model_id:
+        print(f"{RED}No model found. Use --model to specify.{RESET}")
+        sys.exit(1)
+
+    benches = args.bench
+    if "all" in benches:
+        benches = ["gsm8k", "arc", "hellaswag", "ifeval", "humaneval", "mmlu"]
+
+    print_header(f"LLM Evaluation — {model_id}")
+    print(f"  {BOLD}Runtime:{RESET}     {rt.name} ({rt.url})")
+    print(f"  {BOLD}Benchmarks:{RESET}  {', '.join(benches)}")
+    if args.samples:
+        print(f"  {BOLD}Samples:{RESET}     {args.samples} per benchmark")
+    print()
+
+    results = run_eval_suite(
+        base_url=rt.url,
+        model_id=model_id,
+        benchmarks=benches,
+        max_samples=args.samples,
+        api_key=rt.api_key,
+    )
+
+    # Print summary
+    print(f"\n{'='*60}")
+    print(f"  EVALUATION RESULTS — {model_id}")
+    print(f"{'='*60}\n")
+    print(f"  {'Benchmark':<15} {'Score':>8} {'Correct':>10} {'Total':>8}")
+    print(f"  {'-'*45}")
+    for name, score_data in results.items():
+        score_pct = f"{score_data['score']:.1%}"
+        correct = score_data["correct"]
+        total = score_data["total"]
+        print(f"  {name:<15} {score_pct:>8} {correct:>10} {total:>8}")
+
+    # Save results
+    from .benchmark_results import BenchmarkRecord, save_result
+    record = BenchmarkRecord(
+        type="eval",
+        model=model_id,
+        runtime=rt.name,
+        quality_scores={name: data for name, data in results.items()},
+        extra={"benchmarks": benches, "samples": args.samples},
+    )
+    path = save_result(record)
+    print(f"\n  Results saved to {path}")
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
@@ -613,6 +1436,16 @@ def main() -> None:
         "calc": lambda: cmd_calc(args),
         "memory": lambda: cmd_memory(args),
         "scan": lambda: cmd_scan(args),
+        "gpu-optimize": lambda: cmd_gpu_optimize(args),
+        "batch-optimize": lambda: cmd_batch_optimize(args),
+        "benchmark": lambda: cmd_benchmark(args),
+        "quality": lambda: cmd_quality(args),
+        "speed": lambda: cmd_speed(args),
+        "monitor": lambda: cmd_monitor(args),
+        "results": lambda: cmd_results(args),
+        "throughput": lambda: cmd_throughput(args),
+        "fetch-config": lambda: cmd_fetch_config(args),
+        "eval": lambda: cmd_eval(args),
     }
 
     commands[args.command]()
