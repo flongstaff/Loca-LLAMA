@@ -40,3 +40,4 @@ pytest-of-flong/
 
 # Planning folders (local development)
 .planning/
+plans/
