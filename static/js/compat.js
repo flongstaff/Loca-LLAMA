@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { escapeHtml, tierToCssClass, detectHardware } from "./utils.js";
+import { escapeHtml, tierToCssClass, detectHardware, copyToClipboard } from "./utils.js";
 
 let compatResults = [];
 let compatSortCol = "tier";
@@ -185,10 +185,20 @@ function renderCompatTable() {
     .join("");
 
   container.innerHTML = `
+    <div class="results-actions">
+      <button class="btn btn-copy" id="compat-copy-btn" title="Copy results as text">Copy Results</button>
+    </div>
     <table>
       <thead><tr>${ths}</tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
+
+  document.getElementById("compat-copy-btn").addEventListener("click", (e) => {
+    const hwName = document.getElementById("hw-select").value;
+    const quantName = document.getElementById("quant-select").value;
+    const text = formatCompatResultsText(sorted, hwName, quantName);
+    copyToClipboard(text, e.currentTarget);
+  });
 
   container.querySelectorAll("th.sortable").forEach((th) => {
     th.addEventListener("click", () => {
@@ -230,7 +240,10 @@ async function showDetail(modelName) {
 
   detail.classList.remove("hidden");
   detail.innerHTML = `
-    <h3>${escapeHtml(result.model_name)} <span class="badge ${tierToCssClass(result.tier)}">${escapeHtml(result.tier_label)}</span></h3>
+    <div class="detail-header-row">
+      <h3>${escapeHtml(result.model_name)} <span class="badge ${tierToCssClass(result.tier)}">${escapeHtml(result.tier_label)}</span></h3>
+      <button class="btn btn-copy btn-copy-sm" id="compat-detail-copy-btn" title="Copy model info">Copy</button>
+    </div>
     <div class="detail-grid">
       <div class="detail-item"><span class="label">Model Size</span><span class="value">${result.model_size_gb.toFixed(2)} GB</span></div>
       <div class="detail-item"><span class="label">KV Cache</span><span class="value">${result.kv_cache_gb.toFixed(2)} GB</span></div>
@@ -245,6 +258,65 @@ async function showDetail(modelName) {
       <div class="detail-item"><span class="label">Context</span><span class="value">${(result.context_length / 1024).toFixed(0)}K</span></div>
       <div class="detail-item"><span class="label">Max Context</span><span class="value">${maxCtx}</span></div>
     </div>`;
+
+  document.getElementById("compat-detail-copy-btn").addEventListener("click", (e) => {
+    const text = formatCompatDetailText(result, maxCtx);
+    copyToClipboard(text, e.currentTarget);
+  });
+}
+
+function formatCompatResultsText(results, hwName, quantName) {
+  const header = `Loca-LLAMA Compatibility Report\nHardware: ${hwName} | Quantization: ${quantName}\n${"=".repeat(60)}\n`;
+
+  const colWidths = { model: 0, mem: 10, head: 10, util: 7, tier: 16, speed: 10 };
+  results.forEach((r) => {
+    colWidths.model = Math.max(colWidths.model, r.model_name.length);
+  });
+
+  const pad = (s, w) => s.padEnd(w);
+  const rpad = (s, w) => s.padStart(w);
+
+  let table = pad("Model", colWidths.model) + "  " +
+    rpad("Total Mem", colWidths.mem) + "  " +
+    rpad("Headroom", colWidths.head) + "  " +
+    rpad("Util %", colWidths.util) + "  " +
+    pad("Tier", colWidths.tier) + "  " +
+    rpad("Est. tok/s", colWidths.speed) + "\n";
+  table += "-".repeat(table.length) + "\n";
+
+  results.forEach((r) => {
+    table += pad(r.model_name, colWidths.model) + "  " +
+      rpad(r.total_memory_gb.toFixed(1) + " GB", colWidths.mem) + "  " +
+      rpad(r.headroom_gb.toFixed(1) + " GB", colWidths.head) + "  " +
+      rpad(r.memory_utilization_pct.toFixed(0) + "%", colWidths.util) + "  " +
+      pad(r.tier_label, colWidths.tier) + "  " +
+      rpad(r.estimated_tok_per_sec != null ? r.estimated_tok_per_sec.toFixed(1) : "—", colWidths.speed) + "\n";
+  });
+
+  const fits = results.filter((r) => r.tier !== "wont_fit").length;
+  const footer = `\n${fits} of ${results.length} models fit in memory`;
+
+  return header + table + footer;
+}
+
+function formatCompatDetailText(result, maxCtx) {
+  return [
+    `Loca-LLAMA Model Analysis: ${result.model_name}`,
+    `${"=".repeat(40)}`,
+    `Tier:           ${result.tier_label}`,
+    `Model Size:     ${result.model_size_gb.toFixed(2)} GB`,
+    `KV Cache:       ${result.kv_cache_gb.toFixed(2)} GB`,
+    `Overhead:       ${result.overhead_gb.toFixed(2)} GB`,
+    `Total Memory:   ${result.total_memory_gb.toFixed(2)} GB`,
+    `Available:      ${result.available_memory_gb.toFixed(1)} GB`,
+    `Headroom:       ${result.headroom_gb.toFixed(1)} GB`,
+    `Utilization:    ${result.memory_utilization_pct.toFixed(1)}%`,
+    `Est. Speed:     ${result.estimated_tok_per_sec != null ? result.estimated_tok_per_sec.toFixed(1) + " tok/s" : "N/A"}`,
+    `GPU Layers:     ${result.gpu_layers != null ? result.gpu_layers + " / " + result.total_layers : "N/A"}`,
+    `GPU Offload:    ${result.offload_pct != null ? result.offload_pct.toFixed(0) + "%" : "N/A"}`,
+    `Context:        ${(result.context_length / 1024).toFixed(0)}K`,
+    `Max Context:    ${maxCtx}`,
+  ].join("\n");
 }
 
 export function initCompat() {
