@@ -229,6 +229,74 @@ def _generate_seed_sql() -> str:
     return "\n".join(stmts)
 
 
+def _generate_seed_json() -> dict[str, list[list[Any]]]:
+    """Generate deterministic seed data as JSON arrays for DuckDB-WASM.
+
+    Returns dict with table names as keys and lists of row-arrays as values.
+    Uses the same Random(42) seed as _generate_seed_sql() for identical data.
+    """
+    rng = random.Random(42)
+    customers: list[list[Any]] = []
+    products: list[list[Any]] = []
+    orders: list[list[Any]] = []
+    order_items: list[list[Any]] = []
+
+    for i in range(1, 101):
+        first = rng.choice(_FIRST_NAMES)
+        last = rng.choice(_LAST_NAMES)
+        name = f"{first} {last}"
+        email = f"{first.lower()}.{last.lower()}{i}@example.com"
+        city, state = rng.choice(_CITIES)
+        year = rng.choice([2022, 2023, 2024])
+        month = rng.randint(1, 12)
+        day = rng.randint(1, 28)
+        created = f"{year}-{month:02d}-{day:02d}"
+        customers.append([i, name, email, city, state, "US", created])
+
+    for i, (pname, cat, subcat, price, cost) in enumerate(_PRODUCT_CATALOG, 1):
+        products.append([i, pname, cat, subcat, price, cost])
+
+    statuses = ["completed", "completed", "completed", "completed", "shipped", "pending", "cancelled"]
+    order_id = 0
+    item_id = 0
+    for _ in range(500):
+        order_id += 1
+        cust_id = rng.randint(1, 100)
+        year = rng.choice([2023, 2024, 2024, 2024, 2025, 2025])
+        month = rng.randint(1, 12)
+        day = rng.randint(1, 28)
+        order_date = f"{year}-{month:02d}-{day:02d}"
+        status = rng.choice(statuses)
+
+        num_items = rng.randint(1, 5)
+        total = 0.0
+        batch: list[list[Any]] = []
+        used_products: set[int] = set()
+        for _ in range(num_items):
+            prod_id = rng.randint(1, len(_PRODUCT_CATALOG))
+            if prod_id in used_products:
+                continue
+            used_products.add(prod_id)
+            qty = rng.randint(1, 3)
+            unit_price = _PRODUCT_CATALOG[prod_id - 1][3]
+            discount = rng.choice([0.0, 0.0, 0.0, 0.05, 0.10, 0.15])
+            line_total = qty * unit_price * (1 - discount)
+            total += line_total
+            item_id += 1
+            batch.append([item_id, order_id, prod_id, qty, unit_price, discount])
+
+        total = round(total, 2)
+        orders.append([order_id, cust_id, order_date, status, total])
+        order_items.extend(batch)
+
+    return {
+        "customers": customers,
+        "products": products,
+        "orders": orders,
+        "order_items": order_items,
+    }
+
+
 # ── Database Creation ───────────────────────────────────────────────────────
 
 def create_benchmark_db() -> sqlite3.Connection:
