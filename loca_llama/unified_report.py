@@ -16,11 +16,33 @@ from __future__ import annotations
 import html
 import json
 import platform
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from .benchmark_results import BenchmarkRecord, load_results
+
+# ── Helpers ───────────────────────────────────────────────────────────────
+
+_CLOUD_RUNTIMES = {"openrouter", "litellm", "openai", "anthropic", "together"}
+
+_CATEGORY_ORDER = ["Cloud API", "Local (Large)", "Local (Medium)", "Local (Small)", "Local"]
+
+
+def _categorize_model(model: str, runtime: str) -> str:
+    """Infer model category from runtime and model name."""
+    if any(r in runtime.lower() for r in _CLOUD_RUNTIMES):
+        return "Cloud API"
+    match = re.search(r"(\d+)[Bb]", model)
+    if match:
+        params = int(match.group(1))
+        if params >= 30:
+            return "Local (Large)"
+        if params >= 13:
+            return "Local (Medium)"
+        return "Local (Small)"
+    return "Local"
 
 
 # ── Data Loading & Normalization ──────────────────────────────────────────
@@ -252,47 +274,62 @@ def _section_leaderboard(scorecards: list[ModelScorecard]) -> str:
         if c.sql_data:
             best["sql"] = max(best["sql"], c.sql_data.get("pass_rate", 0))
 
+    # Group by category, maintaining score order within each group
+    grouped: dict[str, list[ModelScorecard]] = {}
     for c in scorecards:
-        model_safe = html.escape(c.model[:45])
+        cat = _categorize_model(c.model, c.runtime)
+        grouped.setdefault(cat, []).append(c)
 
-        # Speed cell
-        spd = c.speed_data.get("tokens_per_second", 0) if c.speed_data else 0
-        spd_cls = _score_class(spd / best["speed"] if best["speed"] else 0)
-        spd_cell = f'<td class="{spd_cls}">{spd:.1f} t/s</td>' if spd else '<td class="na">—</td>'
-
-        # Quality cell
-        qr = c.quality_data.get("pass_rate", -1) if c.quality_data else -1
-        q_cls = _score_class(qr) if qr >= 0 else "na"
-        q_cell = f'<td class="{q_cls}">{qr:.0%}</td>' if qr >= 0 else '<td class="na">—</td>'
-
-        # Eval cell
-        eval_scores = []
-        if c.eval_data:
-            for v in c.eval_data.values():
-                if isinstance(v, dict) and "score" in v:
-                    eval_scores.append(v["score"])
-        eval_avg = sum(eval_scores) / len(eval_scores) if eval_scores else -1
-        e_cls = _score_class(eval_avg) if eval_avg >= 0 else "na"
-        e_cell = f'<td class="{e_cls}">{eval_avg:.0%}</td>' if eval_avg >= 0 else '<td class="na">—</td>'
-
-        # SQL cell
-        sql_pr = c.sql_data.get("pass_rate", -1) if c.sql_data else -1
-        sql_cls = _score_class(sql_pr) if sql_pr >= 0 else "na"
-        sql_p = c.sql_data.get("total_pass", 0) if c.sql_data else 0
-        sql_t = c.sql_data.get("total_questions", 0) if c.sql_data else 0
-        sql_cell = f'<td class="{sql_cls}">{sql_p}/{sql_t}</td>' if sql_pr >= 0 else '<td class="na">—</td>'
-
-        # Overall
-        o_cls = _score_class(c.overall_score / 100)
-        badge = " ★" if c == scorecards[0] else ""
-
+    for cat in _CATEGORY_ORDER:
+        cat_cards = grouped.get(cat)
+        if not cat_cards:
+            continue
         rows += (
-            f'<tr>'
-            f'<td class="model-name">{model_safe}{badge}</td>'
-            f'<td class="{o_cls}"><strong>{c.overall_score:.0f}</strong></td>'
-            f'{spd_cell}{q_cell}{e_cell}{sql_cell}'
+            f'<tr class="category-header">'
+            f'<td colspan="6">{html.escape(cat)}</td>'
             f'</tr>\n'
         )
+        for c in cat_cards:
+            model_safe = html.escape(c.model[:45])
+
+            # Speed cell
+            spd = c.speed_data.get("tokens_per_second", 0) if c.speed_data else 0
+            spd_cls = _score_class(spd / best["speed"] if best["speed"] else 0)
+            spd_cell = f'<td class="{spd_cls}">{spd:.1f} t/s</td>' if spd else '<td class="na">—</td>'
+
+            # Quality cell
+            qr = c.quality_data.get("pass_rate", -1) if c.quality_data else -1
+            q_cls = _score_class(qr) if qr >= 0 else "na"
+            q_cell = f'<td class="{q_cls}">{qr:.0%}</td>' if qr >= 0 else '<td class="na">—</td>'
+
+            # Eval cell
+            eval_scores = []
+            if c.eval_data:
+                for v in c.eval_data.values():
+                    if isinstance(v, dict) and "score" in v:
+                        eval_scores.append(v["score"])
+            eval_avg = sum(eval_scores) / len(eval_scores) if eval_scores else -1
+            e_cls = _score_class(eval_avg) if eval_avg >= 0 else "na"
+            e_cell = f'<td class="{e_cls}">{eval_avg:.0%}</td>' if eval_avg >= 0 else '<td class="na">—</td>'
+
+            # SQL cell
+            sql_pr = c.sql_data.get("pass_rate", -1) if c.sql_data else -1
+            sql_cls = _score_class(sql_pr) if sql_pr >= 0 else "na"
+            sql_p = c.sql_data.get("total_pass", 0) if c.sql_data else 0
+            sql_t = c.sql_data.get("total_questions", 0) if c.sql_data else 0
+            sql_cell = f'<td class="{sql_cls}">{sql_p}/{sql_t}</td>' if sql_pr >= 0 else '<td class="na">—</td>'
+
+            # Overall
+            o_cls = _score_class(c.overall_score / 100)
+            badge = " ★" if c == scorecards[0] else ""
+
+            rows += (
+                f'<tr>'
+                f'<td class="model-name">{model_safe}{badge}</td>'
+                f'<td class="{o_cls}"><strong>{c.overall_score:.0f}</strong></td>'
+                f'{spd_cell}{q_cell}{e_cell}{sql_cell}'
+                f'</tr>\n'
+            )
 
     return f"""
 <h2>Model Leaderboard</h2>
@@ -327,6 +364,10 @@ def _section_speed_dashboard(scorecards: list[ModelScorecard]) -> str:
 <div class="chart-box" style="margin-top:1rem">
   <h3>Speed vs Responsiveness</h3>
   <canvas id="scatterChart" style="height:280px"></canvas>
+</div>
+<div id="costScatterSection" class="chart-box" style="margin-top:1rem;display:none">
+  <h3>Cost vs Quality</h3>
+  <canvas id="costScatterChart" style="height:280px"></canvas>
 </div>
 """
 
@@ -631,11 +672,27 @@ def _build_chart_data(scorecards: list[ModelScorecard]) -> dict[str, Any]:
                     "color": colors[i % len(colors)],
                 })
 
+    # Cost vs quality scatter (only when cost data available)
+    cost_scatter = []
+    for c in scorecards:
+        cost = 0.0
+        if c.speed_data:
+            cost = c.speed_data.get("cost_cents", 0) or 0
+        if not cost and c.sql_data:
+            cost = c.sql_data.get("cost_cents", 0) or 0
+        if cost > 0:
+            cost_scatter.append({
+                "x": round(cost, 2),
+                "y": round(c.overall_score, 1),
+                "label": c.model[:20],
+            })
+
     return {
         "labels": labels,
         "speed_tps": speed_tps,
         "speed_ttft": speed_ttft,
         "scatter": scatter,
+        "cost_scatter": cost_scatter,
         "radar_axes": eval_benchmarks,
         "radar_datasets": radar_datasets,
     }
@@ -681,6 +738,11 @@ def _unified_css() -> str:
   td { font-variant-numeric: tabular-nums; }
   td:not(:first-child) { text-align: center; }
   .model-name { font-weight: 500; text-align: left !important; white-space: nowrap; }
+  .category-header td {
+    background: var(--surface2); color: var(--accent); font-weight: 700;
+    font-size: 0.82rem; padding: 0.55rem 1rem; letter-spacing: 0.02em;
+    border-left: 3px solid var(--accent); text-align: left !important;
+  }
   .score-high { color: var(--green); font-weight: 600; }
   .score-mid { color: var(--orange); }
   .score-low { color: var(--red); }
@@ -824,6 +886,47 @@ function drawScatterPlot(canvasId, points) {
   ctx.rotate(-Math.PI/2); ctx.fillText('TTFT (ms) →', 0, 0); ctx.restore();
 }
 
+function drawCostScatter(canvasId, points) {
+  if (!points || points.length === 0) return;
+  const section = document.getElementById('costScatterSection');
+  if (section) section.style.display = 'block';
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const H = parseInt(canvas.style.height) || 280;
+  canvas.width = rect.width * dpr; canvas.height = H * dpr;
+  ctx.scale(dpr, dpr);
+  const W = rect.width;
+  const pad = {top: 20, right: 30, bottom: 40, left: 55};
+  const plotW = W - pad.left - pad.right;
+  const plotH = H - pad.top - pad.bottom;
+  const maxX = Math.max(...points.map(p => p.x)) * 1.15 || 1;
+  const maxY = Math.max(...points.map(p => p.y)) * 1.1 || 100;
+
+  const colors = ['#7aa2f7','#9ece6a','#f7768e','#ff9e64','#bb9af7','#7dcfff','#e0af68'];
+  points.forEach((p, i) => {
+    const x = pad.left + (p.x / maxX) * plotW;
+    const y = pad.top + plotH - (p.y / maxY) * plotH;
+    ctx.fillStyle = colors[i % colors.length];
+    ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = getStyle('--text') || '#e2e8f0';
+    ctx.font = '9px sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText(p.label, x + 8, y + 3);
+  });
+
+  ctx.strokeStyle = getStyle('--border') || '#2d3154';
+  ctx.beginPath(); ctx.moveTo(pad.left, pad.top);
+  ctx.lineTo(pad.left, pad.top + plotH);
+  ctx.lineTo(pad.left + plotW, pad.top + plotH); ctx.stroke();
+  ctx.fillStyle = getStyle('--text-dim') || '#8892b0';
+  ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('Cost (cents) →', pad.left + plotW/2, H - 5);
+  ctx.save(); ctx.translate(12, pad.top + plotH/2);
+  ctx.rotate(-Math.PI/2); ctx.fillText('Score →', 0, 0); ctx.restore();
+}
+
 function drawRadarChart(canvasId, axes, datasets) {
   const canvas = document.getElementById(canvasId);
   if (!canvas || axes.length === 0 || datasets.length === 0) return;
@@ -913,6 +1016,7 @@ function sortTable(tableId, colIdx) {
   drawBarChart('speedChart', d.speed_tps, accent, '');
   drawBarChart('ttftChart', d.speed_ttft, orange, 'ms');
   drawScatterPlot('scatterChart', d.scatter || []);
+  drawCostScatter('costScatterChart', d.cost_scatter || []);
   drawRadarChart('radarChart', d.radar_axes || [], d.radar_datasets || []);
 })();
 """

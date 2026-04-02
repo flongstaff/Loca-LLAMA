@@ -10,9 +10,31 @@ from __future__ import annotations
 import html
 import json
 import platform
+import re
 from typing import Any
 
-from .sql_bench import SQLTaskResult, DIFFICULTY_ORDER
+from .sql_bench import (
+    SQLTaskResult, DIFFICULTY_ORDER, SCHEMA_DDL, QUESTIONS,
+    _generate_seed_json,
+)
+
+_CLOUD_RUNTIMES = {"openrouter", "litellm", "openai", "anthropic", "together"}
+_CATEGORY_ORDER = ["Cloud API", "Local (Large)", "Local (Medium)", "Local (Small)", "Local"]
+
+
+def _categorize_model(model: str, runtime: str) -> str:
+    """Infer model category from runtime and model name."""
+    if any(r in runtime.lower() for r in _CLOUD_RUNTIMES):
+        return "Cloud API"
+    match = re.search(r"(\d+)[Bb]", model)
+    if match:
+        params = int(match.group(1))
+        if params >= 30:
+            return "Local (Large)"
+        if params >= 13:
+            return "Local (Medium)"
+        return "Local (Small)"
+    return "Local"
 
 
 def generate_sql_report(
@@ -44,44 +66,61 @@ def generate_sql_report(
         key=lambda x: (DIFFICULTY_ORDER.get(x[1], 99), x[0]),
     )
 
-    # ── Scoreboard rows ─────────────────────────────────────────────────
+    # ── Scoreboard rows (grouped by category) ────────────────────────────
     scoreboard_rows = ""
+    runtime_str = meta.get("runtime", "")
+    grouped_models: dict[str, list[str]] = {}
     for model in models:
-        mr = [r for r in results if r.model == model]
-        total_pass = sum(1 for r in mr if r.status == "pass")
-        total_q = len(mr)
-        pct = (total_pass / total_q * 100) if total_q else 0
+        cat = _categorize_model(model, runtime_str)
+        grouped_models.setdefault(cat, []).append(model)
 
-        diff_cells = ""
-        for d in difficulties:
-            dr = [r for r in mr if r.difficulty == d]
-            d_pass = sum(1 for r in dr if r.status == "pass")
-            d_total = len(dr)
-            d_pct = (d_pass / d_total * 100) if d_total else 0
-            color_cls = "score-high" if d_pct >= 80 else "score-mid" if d_pct >= 50 else "score-low"
-            diff_cells += f'<td class="{color_cls}">{d_pass}/{d_total}</td>'
+    num_cols = 6 + len(difficulties)  # model + score + diffs + tps + ttft + time + retries
+    for cat in _CATEGORY_ORDER:
+        cat_models = grouped_models.get(cat)
+        if not cat_models:
+            continue
+        if len(models) > 1:
+            scoreboard_rows += (
+                f'<tr class="category-header">'
+                f'<td colspan="{num_cols}">{html.escape(cat)}</td>'
+                f'</tr>\n'
+            )
+        for model in cat_models:
+            mr = [r for r in results if r.model == model]
+            total_pass = sum(1 for r in mr if r.status == "pass")
+            total_q = len(mr)
+            pct = (total_pass / total_q * 100) if total_q else 0
 
-        tps_vals = [r.speed_tps for r in mr if r.speed_tps > 0]
-        avg_tps = sum(tps_vals) / len(tps_vals) if tps_vals else 0
-        ttft_vals = [r.ttft_ms for r in mr if r.ttft_ms > 0]
-        avg_ttft = sum(ttft_vals) / len(ttft_vals) if ttft_vals else 0
-        total_time = sum(r.total_ms for r in mr)
-        retries = sum(r.retries for r in mr)
+            diff_cells = ""
+            for d in difficulties:
+                dr = [r for r in mr if r.difficulty == d]
+                d_pass = sum(1 for r in dr if r.status == "pass")
+                d_total = len(dr)
+                d_pct = (d_pass / d_total * 100) if d_total else 0
+                color_cls = "score-high" if d_pct >= 80 else "score-mid" if d_pct >= 50 else "score-low"
+                diff_cells += f'<td class="{color_cls}">{d_pass}/{d_total}</td>'
 
-        model_short = html.escape(model[:50])
-        pct_cls = "score-high" if pct >= 80 else "score-mid" if pct >= 50 else "score-low"
+            tps_vals = [r.speed_tps for r in mr if r.speed_tps > 0]
+            avg_tps = sum(tps_vals) / len(tps_vals) if tps_vals else 0
+            ttft_vals = [r.ttft_ms for r in mr if r.ttft_ms > 0]
+            avg_ttft = sum(ttft_vals) / len(ttft_vals) if ttft_vals else 0
+            total_time = sum(r.total_ms for r in mr)
+            retries = sum(r.retries for r in mr)
 
-        scoreboard_rows += (
-            f'<tr>'
-            f'<td class="model-name">{model_short}</td>'
-            f'<td class="{pct_cls}"><strong>{total_pass}/{total_q}</strong> ({pct:.0f}%)</td>'
-            f'{diff_cells}'
-            f'<td>{avg_tps:.1f}</td>'
-            f'<td>{avg_ttft:.0f}</td>'
-            f'<td>{total_time / 1000:.1f}s</td>'
-            f'<td>{retries}</td>'
-            f'</tr>\n'
-        )
+            model_short = html.escape(model[:50])
+            pct_cls = "score-high" if pct >= 80 else "score-mid" if pct >= 50 else "score-low"
+
+            scoreboard_rows += (
+                f'<tr>'
+                f'<td class="model-name">{model_short}</td>'
+                f'<td class="{pct_cls}"><strong>{total_pass}/{total_q}</strong> ({pct:.0f}%)</td>'
+                f'{diff_cells}'
+                f'<td>{avg_tps:.1f}</td>'
+                f'<td>{avg_ttft:.0f}</td>'
+                f'<td>{total_time / 1000:.1f}s</td>'
+                f'<td>{retries}</td>'
+                f'</tr>\n'
+            )
 
     # Difficulty header cells
     diff_headers = "".join(
@@ -197,6 +236,15 @@ def generate_sql_report(
         "difficulty": diff_breakdown,
     }).replace("</", r"<\/")
 
+    # ── DuckDB-WASM playground data ──────────────────────────────────────
+    seed_data_json = json.dumps(_generate_seed_json()).replace("</", r"<\/")
+    schema_ddl_safe = html.escape(SCHEMA_DDL.strip())
+    playground_questions = json.dumps([
+        {"id": q.id, "difficulty": q.difficulty, "question": q.question,
+         "reference_sql": q.reference_sql}
+        for q in QUESTIONS
+    ]).replace("</", r"<\/")
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -251,6 +299,11 @@ def generate_sql_report(
   td {{ font-variant-numeric: tabular-nums; }}
   td:not(:first-child) {{ text-align: center; }}
   .model-name {{ font-weight: 500; text-align: left !important; white-space: nowrap; }}
+  .category-header td {{
+    background: var(--surface2); color: var(--accent); font-weight: 700;
+    font-size: 0.82rem; padding: 0.55rem 1rem; letter-spacing: 0.02em;
+    border-left: 3px solid var(--accent); text-align: left !important;
+  }}
 
   /* Score colors */
   .score-high {{ color: var(--green); font-weight: 600; }}
@@ -382,6 +435,42 @@ def generate_sql_report(
   /* Flowchart */
   .flow-section {{ margin: 1.5rem 0; }}
   .flow-section canvas {{ width: 100% !important; height: 280px; background: var(--surface); border-radius: 8px; border: 1px solid var(--border); }}
+
+  /* SQL Playground */
+  .sql-playground {{ display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 1rem 0; }}
+  .sql-playground .schema-box {{
+    background: var(--surface); border-radius: 8px; padding: 1rem;
+    border: 1px solid var(--border); max-height: 400px; overflow-y: auto;
+  }}
+  .sql-playground .editor-box {{
+    background: var(--surface); border-radius: 8px; padding: 1rem;
+    border: 1px solid var(--border);
+  }}
+  .sql-playground h3 {{ font-size: 0.9rem; color: var(--text-dim); margin-bottom: 0.75rem; }}
+  .sql-playground select {{
+    width: 100%; padding: 0.4rem; margin-bottom: 0.5rem;
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 4px; font-size: 0.82rem;
+  }}
+  .sql-playground textarea {{
+    width: 100%; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px;
+    font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.82rem;
+    padding: 0.75rem; resize: vertical; min-height: 80px;
+  }}
+  .sql-playground .btn-row {{ display: flex; gap: 0.5rem; margin-top: 0.5rem; }}
+  .sql-playground button {{
+    padding: 0.45rem 1.2rem; border: none; border-radius: 4px;
+    font-weight: 600; font-size: 0.82rem; cursor: pointer;
+  }}
+  .sql-playground .btn-run {{ background: var(--accent); color: #fff; }}
+  .sql-playground .btn-run:disabled {{ opacity: 0.5; cursor: wait; }}
+  .sql-playground .btn-answer {{ background: var(--surface2); color: var(--text-dim); }}
+  #sqlResult {{ margin-top: 0.75rem; overflow-x: auto; }}
+  #sqlResult table {{ font-size: 0.78rem; }}
+  #sqlError {{ margin-top: 0.5rem; }}
+  #sqlStatus {{ color: var(--text-dim); font-size: 0.78rem; margin-top: 0.5rem; }}
+  @media (max-width: 900px) {{ .sql-playground {{ grid-template-columns: 1fr; }} }}
 </style>
 </head>
 <body>
@@ -445,6 +534,28 @@ def generate_sql_report(
 
 <h2>Question Details</h2>
 {question_details}
+
+<h2>Try It Yourself</h2>
+<div class="sql-playground">
+  <div class="schema-box">
+    <h3>Database Schema</h3>
+    <pre class="sql-code">{schema_ddl_safe}</pre>
+  </div>
+  <div class="editor-box">
+    <h3>SQL Query</h3>
+    <select id="exampleSelect" onchange="loadExample()">
+      <option value="">Select an example question...</option>
+    </select>
+    <textarea id="sqlInput" rows="4" placeholder="SELECT * FROM customers LIMIT 10;"></textarea>
+    <div class="btn-row">
+      <button class="btn-run" id="runBtn" onclick="runQuery()">Run Query</button>
+      <button class="btn-answer" id="answerBtn" onclick="showAnswer()" style="display:none">Show Reference SQL</button>
+    </div>
+    <div id="sqlStatus"></div>
+    <div id="sqlError" class="error-msg" style="display:none"></div>
+    <div id="sqlResult"></div>
+  </div>
+</div>
 
 <div class="footer">
   <span>Generated by Loca-LLAMA SQL Benchmark</span>
@@ -709,6 +820,159 @@ def generate_sql_report(
   drawBarChart('scoreChart', data.scores, green, '%');
   drawBarChart('tpsChart', data.tps, accent, '');
   drawStackedBarChart('diffChart', data.difficulty || []);
+}})();
+</script>
+
+<!-- DuckDB-WASM SQL Playground -->
+<script>
+(function() {{
+  const SEED = {seed_data_json};
+  const PQ = {playground_questions};
+  const SCHEMA = `{SCHEMA_DDL.strip()}`;
+
+  // Populate example dropdown
+  const sel = document.getElementById('exampleSelect');
+  if (sel) {{
+    PQ.forEach(q => {{
+      const opt = document.createElement('option');
+      opt.value = q.id;
+      opt.textContent = '[' + q.difficulty + '] Q' + q.id + ': ' + q.question.slice(0, 80);
+      sel.appendChild(opt);
+    }});
+  }}
+
+  let currentRef = '';
+  function loadExample() {{
+    const qid = parseInt(sel.value);
+    const q = PQ.find(x => x.id === qid);
+    if (q) {{
+      document.getElementById('sqlInput').value = '-- ' + q.question + '\\n';
+      currentRef = q.reference_sql;
+      document.getElementById('answerBtn').style.display = 'inline-block';
+    }} else {{
+      currentRef = '';
+      document.getElementById('answerBtn').style.display = 'none';
+    }}
+    document.getElementById('sqlResult').innerHTML = '';
+    document.getElementById('sqlError').style.display = 'none';
+  }}
+  window.loadExample = loadExample;
+
+  function showAnswer() {{
+    if (currentRef) {{
+      document.getElementById('sqlInput').value = currentRef;
+    }}
+  }}
+  window.showAnswer = showAnswer;
+
+  let db = null, conn = null, loading = false;
+
+  async function initDuckDB() {{
+    if (conn) return;
+    if (loading) return;
+    loading = true;
+    const status = document.getElementById('sqlStatus');
+    status.textContent = 'Loading DuckDB-WASM...';
+
+    try {{
+      // Dynamically load DuckDB-WASM
+      await new Promise((resolve, reject) => {{
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.29.0/dist/duckdb-browser-eh.js';
+        script.onload = resolve;
+        script.onerror = () => reject(new Error('Failed to load DuckDB-WASM from CDN'));
+        document.head.appendChild(script);
+      }});
+
+      status.textContent = 'Initializing database...';
+      const DUCKDB_BUNDLES = duckdb.getJsDelivrBundles();
+      const bundle = await duckdb.selectBundle(DUCKDB_BUNDLES);
+      const worker = new Worker(bundle.mainWorker);
+      const logger = new duckdb.ConsoleLogger();
+      db = new duckdb.AsyncDuckDB(logger, worker);
+      await db.instantiate(bundle.mainModule);
+      conn = await db.connect();
+
+      // Create schema
+      await conn.query(SCHEMA);
+
+      // Seed data using INSERT statements
+      status.textContent = 'Seeding data...';
+      for (const row of SEED.customers) {{
+        await conn.query(
+          `INSERT INTO customers VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          row
+        );
+      }}
+      for (const row of SEED.products) {{
+        await conn.query(
+          `INSERT INTO products VALUES ($1,$2,$3,$4,$5,$6)`,
+          row
+        );
+      }}
+      for (const row of SEED.orders) {{
+        await conn.query(
+          `INSERT INTO orders VALUES ($1,$2,$3,$4,$5)`,
+          row
+        );
+      }}
+      for (const row of SEED.order_items) {{
+        await conn.query(
+          `INSERT INTO order_items VALUES ($1,$2,$3,$4,$5,$6)`,
+          row
+        );
+      }}
+      status.textContent = 'Database ready. ' + SEED.customers.length + ' customers, '
+        + SEED.products.length + ' products, ' + SEED.orders.length + ' orders loaded.';
+    }} catch(e) {{
+      status.textContent = '';
+      loading = false;
+      throw e;
+    }}
+  }}
+
+  async function runQuery() {{
+    const btn = document.getElementById('runBtn');
+    const errDiv = document.getElementById('sqlError');
+    const resultDiv = document.getElementById('sqlResult');
+    const sql = document.getElementById('sqlInput').value.trim();
+    errDiv.style.display = 'none';
+    resultDiv.innerHTML = '';
+
+    if (!sql) return;
+
+    btn.disabled = true;
+    btn.textContent = 'Running...';
+    try {{
+      await initDuckDB();
+      const result = await conn.query(sql);
+      const columns = result.schema.fields.map(f => f.name);
+      const rows = result.toArray().map(row => {{
+        const obj = row.toJSON();
+        return columns.map(c => obj[c]);
+      }});
+
+      // Render table
+      let h = '<table><thead><tr>' + columns.map(c => '<th>' + c + '</th>').join('') + '</tr></thead><tbody>';
+      const maxRows = Math.min(rows.length, 50);
+      for (let i = 0; i < maxRows; i++) {{
+        h += '<tr>' + rows[i].map(v => '<td style="text-align:left">' + (v === null ? 'NULL' : String(v)) + '</td>').join('') + '</tr>';
+      }}
+      if (rows.length > 50) {{
+        h += '<tr><td colspan="' + columns.length + '">... ' + (rows.length - 50) + ' more rows</td></tr>';
+      }}
+      h += '</tbody></table>';
+      h += '<div style="color:var(--text-dim);font-size:0.75rem;margin-top:0.3rem">' + rows.length + ' rows returned</div>';
+      resultDiv.innerHTML = h;
+    }} catch(e) {{
+      errDiv.textContent = e.message || String(e);
+      errDiv.style.display = 'block';
+    }} finally {{
+      btn.disabled = false;
+      btn.textContent = 'Run Query';
+    }}
+  }}
+  window.runQuery = runQuery;
 }})();
 </script>
 </body>
