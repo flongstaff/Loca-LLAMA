@@ -300,6 +300,13 @@ def build_parser() -> argparse.ArgumentParser:
     tp.add_argument("--max-tokens", type=int, default=100, help="Max tokens per request (default: 100)")
     tp.add_argument("--runtime", help="Runtime to use (auto-detected if omitted)")
 
+    # ── report ──
+    report = sub.add_parser("report", help="Generate unified HTML benchmark report")
+    report.add_argument("--models", help="Comma-separated model names to include")
+    report.add_argument("--types", help="Comma-separated benchmark types (speed,quality,eval,sql,throughput)")
+    report.add_argument("--output", default="loca-llama-report.html", help="Output HTML file path")
+    report.add_argument("--limit", type=int, default=200, help="Max results to load (default: 200)")
+
     # ── fetch-config ──
     fc = sub.add_parser("fetch-config", help="Fetch model config from HuggingFace")
     fc.add_argument("repo", help="HuggingFace repo ID (e.g. Qwen/Qwen2.5-72B)")
@@ -1436,6 +1443,41 @@ def cmd_fetch_config(args) -> None:
             print(f"    {BOLD}Usage:{RESET}          {bar(total, avail)}")
 
 
+def cmd_report(args) -> None:
+    from pathlib import Path
+    from .unified_report import load_scorecards, generate_unified_report
+    from .benchmark_results import detect_hardware_string
+
+    models = args.models.split(",") if args.models else None
+    types = args.types.split(",") if args.types else None
+
+    print_header("Unified Benchmark Report")
+    print(f"  Loading saved results...")
+
+    scorecards = load_scorecards(models=models, types=types, limit=args.limit)
+
+    if not scorecards:
+        print(f"{RED}No benchmark results found. Run benchmarks first.{RESET}")
+        sys.exit(1)
+
+    print(f"  Found {len(scorecards)} models with benchmark data.")
+
+    import time as _time
+    metadata = {
+        "title": "Loca-LLAMA Unified Benchmark Report",
+        "timestamp": _time.strftime("%Y-%m-%d %H:%M"),
+        "hardware": detect_hardware_string(),
+    }
+
+    html_content = generate_unified_report(scorecards, metadata)
+    out_path = Path(args.output)
+    out_path.write_text(html_content)
+    print(f"\n{GREEN}Report saved to {out_path.resolve()}{RESET}")
+    print(f"  Models: {', '.join(c.model[:30] for c in scorecards[:5])}")
+    if len(scorecards) > 5:
+        print(f"  ... and {len(scorecards) - 5} more")
+
+
 def cmd_eval(args) -> None:
     from .eval_benchmarks import run_eval_suite
 
@@ -1521,6 +1563,7 @@ def main() -> None:
         "results": lambda: cmd_results(args),
         "throughput": lambda: cmd_throughput(args),
         "fetch-config": lambda: cmd_fetch_config(args),
+        "report": lambda: cmd_report(args),
         "eval": lambda: cmd_eval(args),
     }
 
