@@ -1,7 +1,10 @@
 """Apple Silicon hardware specifications database."""
 
+import logging
 import subprocess
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -82,7 +85,8 @@ def _sysctl(key: str) -> str:
             ["sysctl", "-n", key],
             capture_output=True, text=True, timeout=5,
         ).stdout.strip()
-    except Exception:
+    except (subprocess.SubprocessError, OSError, ValueError, TimeoutError) as e:
+        logger.debug("sysctl %s failed: %s", key, e)
         return ""
 
 

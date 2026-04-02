@@ -109,6 +109,8 @@ class AppState:
     def create_benchmark_job(
         self, runtime_name: str, model_id: str, num_runs: int
     ) -> BenchmarkJob:
+        if self.active_job_count() >= MAX_ACTIVE_JOBS:
+            raise ValueError(f"Too many active jobs ({MAX_ACTIVE_JOBS} max)")
         self.cleanup_old_jobs()
         job_id = str(uuid.uuid4())
         job = BenchmarkJob(
@@ -124,6 +126,8 @@ class AppState:
     def create_sweep_job(
         self, runtime_name: str, model_ids: list[str], num_runs: int
     ) -> SweepJob:
+        if self.active_job_count() >= MAX_ACTIVE_JOBS:
+            raise ValueError(f"Too many active jobs ({MAX_ACTIVE_JOBS} max)")
         self.cleanup_old_jobs()
         job_id = str(uuid.uuid4())
         job = SweepJob(
@@ -140,6 +144,8 @@ class AppState:
     def create_throughput_job(
         self, runtime_name: str, model_id: str, concurrency: int, total_requests: int
     ) -> ThroughputJob:
+        if self.active_job_count() >= MAX_ACTIVE_JOBS:
+            raise ValueError(f"Too many active jobs ({MAX_ACTIVE_JOBS} max)")
         self.cleanup_old_jobs()
         job_id = str(uuid.uuid4())
         job = ThroughputJob(
@@ -156,6 +162,8 @@ class AppState:
     def create_compare_job(
         self, runtime_a: str, runtime_b: str, model_id: str, num_runs: int
     ) -> CompareJob:
+        if self.active_job_count() >= MAX_ACTIVE_JOBS:
+            raise ValueError(f"Too many active jobs ({MAX_ACTIVE_JOBS} max)")
         self.cleanup_old_jobs()
         job_id = str(uuid.uuid4())
         job = CompareJob(
@@ -172,6 +180,8 @@ class AppState:
     def create_sql_bench_job(
         self, runtime_name: str, model_ids: list[str], total_questions: int
     ) -> SqlBenchJob:
+        if self.active_job_count() >= MAX_ACTIVE_JOBS:
+            raise ValueError(f"Too many active jobs ({MAX_ACTIVE_JOBS} max)")
         self.cleanup_old_jobs()
         job_id = str(uuid.uuid4())
         job = SqlBenchJob(

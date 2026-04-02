@@ -299,7 +299,7 @@ class TestDetectHardwareString:
         assert len(result) > 0
 
     def test_should_return_string_when_hardware_detection_raises(self):
-        with patch("loca_llama.hardware.detect_mac", side_effect=Exception("no hardware")):
+        with patch("loca_llama.hardware.detect_mac", side_effect=OSError("no hardware")):
             result = detect_hardware_string()
         assert isinstance(result, str)
         assert len(result) > 0
@@ -307,7 +307,7 @@ class TestDetectHardwareString:
     def test_should_fall_back_to_platform_machine_on_non_darwin(self):
         import platform as _platform
         with (
-            patch("loca_llama.hardware.detect_mac", side_effect=Exception),
+            patch("loca_llama.hardware.detect_mac", side_effect=ImportError),
             patch("loca_llama.benchmark_results.platform.system", return_value="Linux"),
         ):
             result = detect_hardware_string()

@@ -15,6 +15,7 @@ Then point your client at the proxy:
 from __future__ import annotations
 
 import json
+import logging
 import sys
 import threading
 import time
@@ -23,6 +24,8 @@ import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from io import BytesIO
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 _request_logs: list[dict[str, Any]] = []
@@ -139,7 +142,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             err_body = e.read()
             self.wfile.write(err_body)
             return
-        except Exception as e:
+        except (urllib.error.URLError, OSError, TimeoutError, ConnectionError) as e:
+            logger.debug("proxy request to %s failed: %s", target, e)
             self.send_response(502)
             self.end_headers()
             self.wfile.write(json.dumps({"error": str(e)}).encode())

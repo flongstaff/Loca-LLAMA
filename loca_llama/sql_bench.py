@@ -302,6 +302,10 @@ def generate_seed_json() -> dict[str, list[list[Any]]]:
 def create_benchmark_db() -> sqlite3.Connection:
     """Create a fresh in-memory SQLite database with schema and seed data."""
     conn = sqlite3.connect(":memory:")
+    try:
+        conn.enable_load_extension(False)
+    except AttributeError:
+        pass  # Not available in all SQLite builds
     conn.executescript(SCHEMA_DDL)
     conn.executescript(_generate_seed_sql())
     conn.commit()

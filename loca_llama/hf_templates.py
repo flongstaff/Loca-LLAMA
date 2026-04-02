@@ -6,10 +6,14 @@ from model authors — complementing our static templates with live data.
 """
 
 import json
+import logging
 import re
+import urllib.error
 import urllib.request
 import urllib.parse
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 
 HF_RAW_URL = "https://huggingface.co/{repo_id}/raw/main/{filename}"
@@ -70,22 +74,43 @@ class HFModelConfig:
 
 
 def _fetch_json(url: str, timeout: int = 10) -> dict | None:
-    """Fetch and parse JSON from a URL."""
+    """Fetch and parse JSON from a URL.
+
+    Lets urllib.error.URLError propagate so callers (route handlers) can
+    distinguish network failures from missing/malformed files.
+    """
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "loca-llama/0.1"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode())
-    except Exception:
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            # File not present in repo — not a network error, treat as absent
+            logger.debug("_fetch_json 404 for %s", url)
+            return None
+        raise
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.warning("_fetch_json data error for %s: %s", url, e)
         return None
 
 
 def _fetch_text(url: str, timeout: int = 10) -> str | None:
-    """Fetch text content from a URL."""
+    """Fetch text content from a URL.
+
+    Lets urllib.error.URLError propagate so callers (route handlers) can
+    distinguish network failures from missing/malformed files.
+    """
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "loca-llama/0.1"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.read().decode()
-    except Exception:
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            logger.debug("_fetch_text 404 for %s", url)
+            return None
+        raise
+    except (ValueError, OSError) as e:
+        logger.warning("_fetch_text data error for %s: %s", url, e)
         return None
 
 

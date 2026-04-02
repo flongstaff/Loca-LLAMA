@@ -7,12 +7,15 @@ via ThreadPoolExecutor to measure aggregate multi-user throughput.
 from __future__ import annotations
 
 import json
+import logging
 import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -125,8 +128,9 @@ def _single_request(
             tokens_per_second=tok_per_sec,
             error="No tokens generated" if tokens == 0 else None,
         )
-    except Exception as e:
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError, TimeoutError) as e:
         elapsed_ms = (time.perf_counter() - start) * 1000
+        logger.debug("request %d failed: %s", request_id, e)
         return RequestResult(
             request_id=request_id,
             success=False,

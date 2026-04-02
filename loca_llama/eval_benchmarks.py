@@ -206,8 +206,7 @@ def run_gsm8k(
 
         except Exception as e:
             errors += 1
-            if (i + 1) % 50 == 0:
-                print(f"    GSM8K: {i+1}/{len(data)} (error: {e})", flush=True)
+            logger.warning("GSM8K benchmark %d/%d error: %s", i + 1, len(data), e)
 
     score = correct / total if total > 0 else 0
     avg_time = sum(sample_timings) / len(sample_timings) if sample_timings else 0
@@ -281,8 +280,9 @@ def run_arc_challenge(
             if (i + 1) % 50 == 0:
                 print(f"    ARC: {i+1}/{len(data)} ({correct}/{total} correct)", flush=True)
 
-        except Exception:
+        except Exception as e:
             errors += 1
+            logger.warning("ARC benchmark %d/%d error: %s", i + 1, len(data), e)
 
     score = correct / total if total > 0 else 0
     print(f"  ARC-Challenge: {correct}/{total} = {score:.1%}")
@@ -402,8 +402,9 @@ def run_hellaswag(
             if (i + 1) % 50 == 0:
                 print(f"    HellaSwag: {i+1}/{len(data)} ({correct}/{total} correct)", flush=True)
 
-        except Exception:
+        except Exception as e:
             errors += 1
+            logger.warning("HellaSwag benchmark %d/%d error: %s", i + 1, len(data), e)
 
     score = correct / total if total > 0 else 0
     print(f"  HellaSwag: {correct}/{total} = {score:.1%}")
@@ -648,8 +649,9 @@ def run_ifeval(
             if (i + 1) % 30 == 0:
                 print(f"    IFEval: {i+1}/{len(data)} ({correct}/{total} correct)", flush=True)
 
-        except Exception:
+        except Exception as e:
             errors += 1
+            logger.warning("IFEval benchmark %d/%d error: %s", i + 1, len(data), e)
 
     score = correct / total if total > 0 else 0
     print(f"  IFEval: {correct}/{total} = {score:.1%}")
@@ -715,8 +717,9 @@ def run_humaneval(
             if (i + 1) % 20 == 0:
                 print(f"    HumanEval: {i+1}/{len(data)} ({correct}/{total} correct)", flush=True)
 
-        except Exception:
+        except Exception as e:
             errors += 1
+            logger.warning("HumanEval benchmark %d/%d error: %s", i + 1, len(data), e)
 
     score = correct / total if total > 0 else 0
     print(f"  HumanEval: {correct}/{total} = {score:.1%}")

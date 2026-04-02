@@ -7,6 +7,7 @@ to ~/.loca-llama/results/ as individual JSON files per run.
 from __future__ import annotations
 
 import json
+import logging
 import platform
 import re
 import tempfile
@@ -16,6 +17,8 @@ from pathlib import Path
 from typing import Any
 
 from .types import BenchmarkType
+
+logger = logging.getLogger(__name__)
 
 
 RESULTS_DIR = Path.home() / ".loca-llama" / "results"
@@ -57,8 +60,8 @@ def detect_hardware_string() -> str:
         if result:
             _key, spec = result
             return f"{spec.chip} {spec.memory_gb}GB"
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("detect_mac() failed: %s", e)
 
     # Fallback: try to read chip + memory directly via sysctl on macOS
     if platform.system() == "Darwin":
@@ -76,8 +79,8 @@ def detect_hardware_string() -> str:
                 chip = brand.removeprefix("Apple ")
                 mem_gb = round(int(mem_bytes) / (1024 ** 3))
                 return f"{chip} {mem_gb}GB"
-        except Exception:
-            pass
+        except (subprocess.SubprocessError, OSError, ValueError) as e:
+            logger.debug("sysctl hardware detection failed: %s", e)
 
     return platform.machine()
 
