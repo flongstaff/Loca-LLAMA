@@ -24,6 +24,11 @@ from loca_llama.api.schemas import (
     CompareResult,
     CompareResponse,
     CompareStartRequest,
+    SqlBenchModelResult,
+    SqlBenchProgress,
+    SqlBenchQuestionResult,
+    SqlBenchStartRequest,
+    SqlBenchStatusResponse,
     SweepComboResult,
     SweepProgress,
     SweepStartRequest,
@@ -32,7 +37,7 @@ from loca_llama.api.schemas import (
     ThroughputResponse,
     ThroughputStartRequest,
 )
-from loca_llama.api.state import AppState, BenchmarkJob, SweepJob, ThroughputJob, CompareJob
+from loca_llama.api.state import MAX_ACTIVE_JOBS, AppState, BenchmarkJob, SqlBenchJob, SweepJob, ThroughputJob, CompareJob
 from loca_llama.benchmark import (
     BENCH_PROMPTS,
     RuntimeInfo,
@@ -66,6 +71,13 @@ async def start_benchmark(
     state: AppState = Depends(get_state),
 ) -> BenchmarkStartResponse:
     """Start a benchmark run as a background task."""
+    # Rate limit: reject if too many jobs are already running
+    if state.active_job_count() >= MAX_ACTIVE_JOBS:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many active jobs ({MAX_ACTIVE_JOBS} max). Wait for current jobs to complete.",
+        )
+
     # Detect runtimes and find the requested one
     try:
         runtimes = await asyncio.to_thread(detect_all_runtimes)
@@ -261,6 +273,12 @@ async def start_sweep(
     state: AppState = Depends(get_state),
 ) -> BenchmarkStartResponse:
     """Start a sweep benchmark across multiple models."""
+    if state.active_job_count() >= MAX_ACTIVE_JOBS:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many active jobs ({MAX_ACTIVE_JOBS} max). Wait for current jobs to complete.",
+        )
+
     # Detect runtimes and find the requested one
     try:
         runtimes = await asyncio.to_thread(detect_all_runtimes)
@@ -826,3 +844,186 @@ async def _run_compare_background(
         state.cleanup_old_jobs()
 
 
+# ── SQL Benchmark ────────────────────────────────────────────────────────────
+
+
+@router.post("/sql", response_model=BenchmarkStartResponse)
+async def start_sql_benchmark(
+    req: SqlBenchStartRequest,
+    state: AppState = Depends(get_state),
+) -> BenchmarkStartResponse:
+    """Start SQL generation benchmark as a background task."""
+    if state.active_job_count() >= MAX_ACTIVE_JOBS:
+        raise HTTPException(429, "Too many active jobs")
+
+    from loca_llama.sql_bench import QUESTIONS
+
+    questions = QUESTIONS
+    if req.difficulties:
+        valid = {d.lower() for d in req.difficulties}
+        questions = [q for q in questions if q.difficulty in valid]
+
+    job = state.create_sql_bench_job(req.runtime_name, req.model_ids, len(questions))
+    loop = asyncio.get_running_loop()
+
+    async def _run() -> None:
+        try:
+            from loca_llama.sql_bench import run_sql_benchmark
+
+            runtimes = detect_all_runtimes()
+            rt = next((r for r in runtimes if r.name == req.runtime_name), None)
+            if not rt:
+                job.status = "error"
+                job.error = f"Runtime '{req.runtime_name}' not found"
+                return
+
+            def progress_cb(m_idx: int, total_m: int, q_idx: int, total_q: int) -> None:
+                loop.call_soon_threadsafe(
+                    _update_sql_progress, job, m_idx, total_m, q_idx, total_q
+                )
+
+            results = await asyncio.to_thread(
+                run_sql_benchmark,
+                rt.url, req.model_ids,
+                api_key=rt.api_key,
+                runtime_name=rt.name,
+                difficulties=[d.lower() for d in req.difficulties] if req.difficulties else None,
+                max_retries=req.max_retries,
+                progress_callback=progress_cb,
+            )
+
+            job.results = [
+                {
+                    "question_id": r.question_id,
+                    "question": r.question,
+                    "difficulty": r.difficulty,
+                    "model": r.model,
+                    "status": r.status,
+                    "generated_sql": r.generated_sql,
+                    "error_message": r.error_message,
+                    "speed_tps": r.speed_tps,
+                    "ttft_ms": r.ttft_ms,
+                    "total_ms": r.total_ms,
+                    "retries": r.retries,
+                }
+                for r in results
+            ]
+            job.status = "complete"
+        except Exception as e:
+            logger.error("SQL bench job %s failed: %s", job.job_id, e)
+            job.status = "error"
+            job.error = "SQL benchmark failed — check server logs"
+        finally:
+            state.cleanup_old_jobs()
+
+    job.task = asyncio.create_task(_run())
+    return BenchmarkStartResponse(job_id=job.job_id, status="running")
+
+
+def _update_sql_progress(
+    job: SqlBenchJob, m_idx: int, total_m: int, q_idx: int, total_q: int
+) -> None:
+    job.current_model = m_idx
+    job.total_models = total_m
+    job.current_question = q_idx
+    job.total_questions = total_q
+
+
+@router.get("/sql/{job_id}", response_model=SqlBenchStatusResponse)
+async def get_sql_benchmark_status(
+    job_id: str,
+    state: AppState = Depends(get_state),
+) -> SqlBenchStatusResponse:
+    """Poll SQL benchmark status with per-question results."""
+    job = state.sql_bench_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, f"SQL benchmark job '{job_id}' not found")
+
+    progress = None
+    if job.status == "running":
+        progress = SqlBenchProgress(
+            current_model=job.current_model,
+            total_models=job.total_models,
+            current_question=job.current_question,
+            total_questions=job.total_questions,
+        )
+
+    model_results = None
+    if job.results:
+        models = sorted(set(r["model"] for r in job.results))
+        model_results = []
+        for model in models:
+            mr = [r for r in job.results if r["model"] == model]
+            total_pass = sum(1 for r in mr if r["status"] == "pass")
+            total_fail = sum(1 for r in mr if r["status"] == "fail")
+            total_error = sum(1 for r in mr if r["status"] == "error")
+
+            by_diff: dict[str, dict[str, int]] = {}
+            for r in mr:
+                d = r["difficulty"]
+                if d not in by_diff:
+                    by_diff[d] = {"pass": 0, "fail": 0, "error": 0, "total": 0}
+                by_diff[d][r["status"]] = by_diff[d].get(r["status"], 0) + 1
+                by_diff[d]["total"] += 1
+
+            tps_vals = [r["speed_tps"] for r in mr if r["speed_tps"] > 0]
+            ttft_vals = [r["ttft_ms"] for r in mr if r["ttft_ms"] > 0]
+
+            model_results.append(SqlBenchModelResult(
+                model_id=model,
+                total_pass=total_pass,
+                total_fail=total_fail,
+                total_error=total_error,
+                score_by_difficulty=by_diff,
+                avg_tps=sum(tps_vals) / len(tps_vals) if tps_vals else 0,
+                avg_ttft_ms=sum(ttft_vals) / len(ttft_vals) if ttft_vals else 0,
+                questions=[SqlBenchQuestionResult(**{
+                    k: v for k, v in r.items() if k != "model"
+                }) for r in mr],
+            ))
+
+    return SqlBenchStatusResponse(
+        job_id=job.job_id,
+        status=job.status,
+        progress=progress,
+        model_results=model_results,
+        error=job.error,
+    )
+
+
+@router.get("/sql/{job_id}/report")
+async def get_sql_benchmark_report(
+    job_id: str,
+    state: AppState = Depends(get_state),
+) -> HTMLResponse:
+    """Generate HTML report for completed SQL benchmark."""
+    job = state.sql_bench_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, f"SQL benchmark job '{job_id}' not found")
+    if job.status != "complete":
+        raise HTTPException(400, "Benchmark not yet complete")
+
+    from loca_llama.sql_bench import SQLTaskResult
+    from loca_llama.sql_bench_report import generate_sql_report
+
+    results = [
+        SQLTaskResult(
+            question_id=r["question_id"],
+            question=r["question"],
+            difficulty=r["difficulty"],
+            model=r["model"],
+            status=r["status"],
+            generated_sql=r.get("generated_sql", ""),
+            error_message=r.get("error_message", ""),
+            speed_tps=r.get("speed_tps", 0),
+            ttft_ms=r.get("ttft_ms", 0),
+            total_ms=r.get("total_ms", 0),
+            retries=r.get("retries", 0),
+        )
+        for r in job.results
+    ]
+
+    report_html = generate_sql_report(results, metadata={
+        "runtime": job.runtime_name,
+    })
+    return HTMLResponse(content=report_html)

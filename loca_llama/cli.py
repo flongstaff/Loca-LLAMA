@@ -264,6 +264,8 @@ def build_parser() -> argparse.ArgumentParser:
     quality.add_argument("--model", help="Test a specific model by ID")
     quality.add_argument("--compare", choices=["pi", "claude"], help="Compare local vs cloud provider")
     quality.add_argument("--runtime", help="Runtime to use (auto-detected if omitted)")
+    quality.add_argument("--compare-backends", action="store_true",
+                         help="Compare oMLX vs LM Studio on the same tests")
 
     # ── speed ──
     speed = sub.add_parser("speed", help="Run speed benchmark")
@@ -273,6 +275,8 @@ def build_parser() -> argparse.ArgumentParser:
                        default="default", help="Prompt type (default: default)")
     speed.add_argument("--sweep", action="store_true", help="Benchmark all loaded models")
     speed.add_argument("--runtime", help="Runtime to use (auto-detected if omitted)")
+    speed.add_argument("--compare-backends", action="store_true",
+                       help="Compare oMLX vs LM Studio on the same tests")
 
     # ── monitor ──
     monitor = sub.add_parser("monitor", help="Proxy monitor for OpenCode sessions")
@@ -282,7 +286,7 @@ def build_parser() -> argparse.ArgumentParser:
     # ── results ──
     results = sub.add_parser("results", help="View saved benchmark results")
     results.add_argument("--model", help="Filter by model name")
-    results.add_argument("--type", choices=["speed", "quality", "monitor", "eval"], help="Filter by type")
+    results.add_argument("--type", choices=["speed", "quality", "monitor", "eval", "sql"], help="Filter by type")
     results.add_argument("--compare", action="store_true", help="Side-by-side latest per model")
     results.add_argument("--limit", type=int, default=30, help="Max results to show (default: 30)")
     results.add_argument("--export", choices=["csv", "html", "md"], help="Export format")
@@ -302,6 +306,16 @@ def build_parser() -> argparse.ArgumentParser:
     fc.add_argument("--calc", action="store_true", help="Auto-run VRAM calc with fetched config")
     fc.add_argument("--quant", default="Q4_K_M", help="Quantization for calc (default: Q4_K_M)")
     fc.add_argument("--context", type=int, default=4096, help="Context for calc (default: 4096)")
+
+    # ── sql ──
+    sql = sub.add_parser("sql", help="Run SQL generation benchmark")
+    sql.add_argument("--model", help="Model ID (auto-detected if omitted)")
+    sql.add_argument("--runtime", help="Runtime to use (auto-detected if omitted)")
+    sql.add_argument("--difficulty", help="Comma-separated: trivial,easy,medium,hard")
+    sql.add_argument("--sweep", action="store_true", help="Benchmark all loaded models")
+    sql.add_argument("--retries", type=int, default=2, help="Max retries per question (default: 2)")
+    sql.add_argument("--export", choices=["html"], help="Export format")
+    sql.add_argument("--output", help="Output file path for export")
 
     # ── eval ──
     ev = sub.add_parser("eval", help="Run standard LLM evaluation benchmarks")
@@ -984,6 +998,67 @@ def _find_runtime(preferred: str | None = None) -> "RuntimeInfo | None":
     return rt
 
 
+def cmd_sql(args) -> None:
+    from pathlib import Path
+    from .sql_bench import (
+        run_sql_benchmark, print_sql_summary, results_to_record,
+    )
+    from .sql_bench_report import generate_sql_report
+    from .benchmark_results import save_result
+
+    rt = _find_runtime(getattr(args, "runtime", None))
+    if not rt:
+        sys.exit(1)
+
+    if args.model:
+        models = [args.model]
+    elif args.sweep:
+        models = rt.models
+        if not models:
+            print(f"{RED}No models found on {rt.name}.{RESET}")
+            sys.exit(1)
+    else:
+        models = rt.models[:1]
+        if not models:
+            print(f"{RED}No models loaded on {rt.name}.{RESET}")
+            sys.exit(1)
+
+    print_header("SQL Generation Benchmark")
+    print(f"  {BOLD}Runtime:{RESET}  {rt.name} ({rt.url})")
+    print(f"  {BOLD}Models:{RESET}   {', '.join(models)}")
+    if args.difficulty:
+        print(f"  {BOLD}Filter:{RESET}   {args.difficulty}")
+    print()
+
+    difficulties = args.difficulty.split(",") if args.difficulty else None
+
+    results = run_sql_benchmark(
+        rt.url, models, api_key=rt.api_key,
+        runtime_name=rt.name, difficulties=difficulties,
+        max_retries=args.retries,
+    )
+    print_sql_summary(results)
+
+    # Save each model's results
+    for model in set(r.model for r in results):
+        model_results = [r for r in results if r.model == model]
+        record = results_to_record(model_results, rt.name)
+        path = save_result(record)
+        print(f"Results saved to {path}")
+
+    # HTML export
+    if args.export == "html":
+        import time as _time
+        html = generate_sql_report(results, metadata={
+            "runtime": rt.name,
+            "hardware": "Apple Silicon",
+            "timestamp": _time.strftime("%Y-%m-%d %H:%M"),
+        })
+        output_path = args.output or "sql_benchmark_report.html"
+        Path(output_path).write_text(html)
+        print(f"\n{GREEN}HTML report saved to {output_path}{RESET}")
+
+
 def cmd_quality(args) -> None:
     from .quality_bench import (
         run_quality_benchmark, run_quality_comparison,
@@ -1439,6 +1514,7 @@ def main() -> None:
         "gpu-optimize": lambda: cmd_gpu_optimize(args),
         "batch-optimize": lambda: cmd_batch_optimize(args),
         "benchmark": lambda: cmd_benchmark(args),
+        "sql": lambda: cmd_sql(args),
         "quality": lambda: cmd_quality(args),
         "speed": lambda: cmd_speed(args),
         "monitor": lambda: cmd_monitor(args),

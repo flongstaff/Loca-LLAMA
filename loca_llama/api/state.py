@@ -76,6 +76,26 @@ class CompareJob:
     task: asyncio.Task | None = None
 
 
+@dataclass
+class SqlBenchJob:
+    """Tracks a running or completed SQL benchmark."""
+
+    job_id: str
+    status: str  # "running", "complete", "error"
+    runtime_name: str
+    model_ids: list[str]
+    current_model: int = 0
+    total_models: int = 0
+    current_question: int = 0
+    total_questions: int = 0
+    results: list[dict] = field(default_factory=list)
+    error: str | None = None
+    task: asyncio.Task | None = None
+
+
+MAX_ACTIVE_JOBS = 3
+
+
 class AppState:
     """Shared application state, created once at startup."""
 
@@ -85,7 +105,15 @@ class AppState:
         self.sweep_jobs: dict[str, SweepJob] = {}
         self.throughput_jobs: dict[str, ThroughputJob] = {}
         self.compare_jobs: dict[str, CompareJob] = {}
+        self.sql_bench_jobs: dict[str, SqlBenchJob] = {}
         self._lock = asyncio.Lock()
+
+    def active_job_count(self) -> int:
+        """Count all currently running jobs across all job types."""
+        count = 0
+        for jobs in (self.benchmark_jobs, self.sweep_jobs, self.throughput_jobs, self.compare_jobs, self.sql_bench_jobs):
+            count += sum(1 for j in jobs.values() if j.status == "running")
+        return count
 
     def create_benchmark_job(
         self, runtime_name: str, model_id: str, num_runs: int
@@ -146,28 +174,31 @@ class AppState:
         self.compare_jobs[job_id] = job
         return job
 
+    def create_sql_bench_job(
+        self, runtime_name: str, model_ids: list[str], total_questions: int
+    ) -> SqlBenchJob:
+        job_id = str(uuid.uuid4())
+        job = SqlBenchJob(
+            job_id=job_id,
+            status="running",
+            runtime_name=runtime_name,
+            model_ids=model_ids,
+            total_models=len(model_ids),
+            total_questions=total_questions,
+        )
+        self.sql_bench_jobs[job_id] = job
+        return job
+
     def cleanup_old_jobs(self, max_jobs: int = 50) -> None:
-        """Remove oldest completed jobs if over limit."""
-        completed = [
-            (k, v)
-            for k, v in self.benchmark_jobs.items()
-            if v.status in ("complete", "error")
-        ]
-        if len(completed) > max_jobs:
-            for k, _ in completed[: len(completed) - max_jobs]:
-                del self.benchmark_jobs[k]
-        # Also clean sweep jobs
-        sweep_completed = [
-            (k, v)
-            for k, v in self.sweep_jobs.items()
-            if v.status in ("complete", "error")
-        ]
-        if len(sweep_completed) > max_jobs:
-            for k, _ in sweep_completed[: len(sweep_completed) - max_jobs]:
-                del self.sweep_jobs[k]
-        # Clean throughput + compare jobs
-        for job_dict in (self.throughput_jobs, self.compare_jobs):
-            done = [(k, v) for k, v in job_dict.items() if v.status in ("complete", "error")]
-            if len(done) > max_jobs:
-                for k, _ in done[: len(done) - max_jobs]:
+        """Remove oldest completed jobs if over limit, cancelling any lingering tasks."""
+        for job_dict in (self.benchmark_jobs, self.sweep_jobs, self.throughput_jobs, self.compare_jobs, self.sql_bench_jobs):
+            completed = [
+                (k, v)
+                for k, v in job_dict.items()
+                if v.status in ("complete", "error")
+            ]
+            if len(completed) > max_jobs:
+                for k, job in completed[: len(completed) - max_jobs]:
+                    if job.task and not job.task.done():
+                        job.task.cancel()
                     del job_dict[k]

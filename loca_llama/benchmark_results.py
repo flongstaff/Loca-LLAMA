@@ -7,6 +7,7 @@ as individual JSON files per run.
 from __future__ import annotations
 
 import json
+import tempfile
 import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -62,12 +63,39 @@ def _ensure_dir() -> Path:
     return RESULTS_DIR
 
 
+def _atomic_write(path: Path, content: str) -> None:
+    """Write content to a file atomically via temp file + rename."""
+    fd, tmp_path = tempfile.mkstemp(
+        dir=path.parent, suffix=".tmp", prefix=".result_"
+    )
+    try:
+        with open(fd, "w") as f:
+            f.write(content)
+        Path(tmp_path).replace(path)
+    except BaseException:
+        Path(tmp_path).unlink(missing_ok=True)
+        raise
+
+
 def save_result(record: BenchmarkRecord) -> Path:
-    """Save a benchmark record to ~/.loca-llama/results/."""
-    out_dir = _ensure_dir()
-    path = out_dir / record.filename
-    path.write_text(json.dumps(asdict(record), indent=2, default=str))
-    return path
+    """Save a benchmark record to ~/.loca-llama/results/.
+
+    Uses atomic writes (temp + rename) to prevent corruption.
+    Falls back to a temp directory if the primary path is not writable.
+    """
+    content = json.dumps(asdict(record), indent=2, default=str)
+    try:
+        out_dir = _ensure_dir()
+        path = out_dir / record.filename
+        _atomic_write(path, content)
+        return path
+    except (PermissionError, OSError) as e:
+        fallback = Path(tempfile.gettempdir()) / "loca-llama-results"
+        fallback.mkdir(parents=True, exist_ok=True)
+        path = fallback / record.filename
+        _atomic_write(path, content)
+        print(f"  Warning: saved to {path} (primary dir not writable: {e})")
+        return path
 
 
 def load_results(
@@ -120,6 +148,12 @@ def print_results_table(records: list[BenchmarkRecord]) -> None:
         if r.type == "quality":
             pass_rate = r.quality_scores.get("pass_rate", 0)
             print(f"{r.type:<10} {model_short:<45} {'pass=' + f'{pass_rate:.0%}':>7} {'':>8} {date_str:>12}")
+        elif r.type == "sql":
+            total_pass = r.quality_scores.get("total_pass", 0)
+            total_q = r.quality_scores.get("total_questions", 0)
+            score_str = f"{total_pass}/{total_q}" if total_q else "—"
+            tps_str = f"{r.tokens_per_second:.1f}" if r.tokens_per_second else "—"
+            print(f"{r.type:<10} {model_short:<45} {score_str:>7} {tps_str:>8} {date_str:>12}")
         elif r.type == "monitor":
             reqs = r.monitor_stats.get("total_requests", 0)
             avg_tps = r.monitor_stats.get("avg_tps", 0)
