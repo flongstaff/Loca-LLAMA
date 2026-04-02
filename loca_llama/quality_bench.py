@@ -338,6 +338,49 @@ def call_openai_api(
     return response_text, tps, ttft, total_ms, prompt_tokens, completion_tokens
 
 
+def call_openai_with_tools(
+    base_url: str,
+    model: str,
+    messages: list[dict],
+    tools: list[dict],
+    api_key: str | None = None,
+    max_tokens: int = 2048,
+    temperature: float = 0.0,
+) -> tuple[dict, int, int, float]:
+    """Call OpenAI-compatible API with tool/function definitions (non-streaming).
+
+    Returns (response_message, prompt_tokens, completion_tokens, total_ms).
+    response_message is the full message dict from choices[0].message.
+    """
+    url = f"{base_url}/v1/chat/completions"
+    payload = json.dumps({
+        "model": model,
+        "messages": messages,
+        "tools": tools,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "stream": False,
+    }).encode()
+
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    start = time.monotonic()
+    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        data = json.loads(resp.read().decode())
+
+    total_ms = (time.monotonic() - start) * 1000
+    message = data["choices"][0]["message"]
+    usage = data.get("usage", {})
+    prompt_tokens = usage.get("prompt_tokens", 0)
+    completion_tokens = usage.get("completion_tokens", 0)
+
+    return message, prompt_tokens, completion_tokens, total_ms
+
+
 # --- Code Extraction & Scoring ---
 
 def extract_python_code(text: str) -> str:

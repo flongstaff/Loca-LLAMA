@@ -321,6 +321,8 @@ def build_parser() -> argparse.ArgumentParser:
     sql.add_argument("--difficulty", help="Comma-separated: trivial,easy,medium,hard")
     sql.add_argument("--sweep", action="store_true", help="Benchmark all loaded models")
     sql.add_argument("--retries", type=int, default=2, help="Max retries per question (default: 2)")
+    sql.add_argument("--mode", choices=["auto", "prompt", "tool-use"], default="auto",
+                     help="Benchmark mode: auto (try tools then prompt), prompt, tool-use")
     sql.add_argument("--export", choices=["html"], help="Export format")
     sql.add_argument("--output", help="Output file path for export")
 
@@ -1030,9 +1032,12 @@ def cmd_sql(args) -> None:
             print(f"{RED}No models loaded on {rt.name}.{RESET}")
             sys.exit(1)
 
+    mode = getattr(args, "mode", "auto")
+
     print_header("SQL Generation Benchmark")
     print(f"  {BOLD}Runtime:{RESET}  {rt.name} ({rt.url})")
     print(f"  {BOLD}Models:{RESET}   {', '.join(models)}")
+    print(f"  {BOLD}Mode:{RESET}     {mode}")
     if args.difficulty:
         print(f"  {BOLD}Filter:{RESET}   {args.difficulty}")
     print()
@@ -1043,6 +1048,7 @@ def cmd_sql(args) -> None:
         rt.url, models, api_key=rt.api_key,
         runtime_name=rt.name, difficulties=difficulties,
         max_retries=args.retries,
+        mode=mode,
     )
     print_sql_summary(results)
 
@@ -1178,6 +1184,7 @@ def cmd_speed(args) -> None:
                     ttft_ms=agg["avg_ttft_ms"],
                     total_time_ms=agg["avg_total_ms"],
                     generated_tokens=agg["total_tokens_generated"],
+                    settings={"prompt_type": args.prompt, "num_runs": args.runs},
                     extra={"median_tps": agg["median_tok_per_sec"], "runs": agg["runs"]},
                 )
                 save_result(record)
@@ -1210,6 +1217,7 @@ def cmd_speed(args) -> None:
                     ttft_ms=agg["avg_ttft_ms"],
                     total_time_ms=agg["avg_total_ms"],
                     generated_tokens=agg["total_tokens_generated"],
+                    settings={"prompt_type": args.prompt, "num_runs": args.runs},
                     extra={
                         "median_tps": agg["median_tok_per_sec"],
                         "p95_tps": agg["p95_tok_per_sec"],
@@ -1528,6 +1536,7 @@ def cmd_eval(args) -> None:
         model=model_id,
         runtime=rt.name,
         quality_scores={name: data for name, data in results.items()},
+        settings={"benchmarks": benches, "samples": args.samples},
         extra={"benchmarks": benches, "samples": args.samples},
     )
     path = save_result(record)

@@ -225,15 +225,40 @@ def get_lm_studio_preset_info(model_id: str, base_url: str = "http://127.0.0.1:1
     return None
 
 
+def detect_openrouter() -> RuntimeInfo | None:
+    """Check if OpenRouter is configured via OPENROUTER_API_KEY env var."""
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        return None
+
+    url = "https://openrouter.ai/api"
+    try:
+        req = urllib.request.Request(
+            f"{url}/v1/models",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "User-Agent": "loca-llama/0.1",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+            models = [m["id"] for m in data.get("data", [])[:20]]
+        return RuntimeInfo(name="openrouter", url=url, models=models, api_key=api_key)
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError, TimeoutError) as e:
+        logger.debug("detect_openrouter failed: %s", e)
+        return None
+
+
 def detect_all_runtimes() -> list[RuntimeInfo]:
     """Detect all running LLM runtimes.
 
     LiteLLM proxy is checked first — if it's running, it can route to
     whichever backend (LM Studio or llama.cpp) is up, so you only need
     one model loaded.  Direct backends are still detected for fallback.
+    OpenRouter checked last (requires API key env var).
     """
     runtimes = []
-    for detector in [detect_omlx, detect_litellm, detect_lm_studio, detect_llama_cpp_server]:
+    for detector in [detect_omlx, detect_litellm, detect_lm_studio, detect_llama_cpp_server, detect_openrouter]:
         info = detector()
         if info:
             runtimes.append(info)

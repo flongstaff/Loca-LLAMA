@@ -23,7 +23,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from .quality_bench import call_openai_api
+from .quality_bench import call_openai_api, call_openai_with_tools
 
 
 # ── Schema DDL ──────────────────────────────────────────────────────────────
@@ -1339,6 +1339,183 @@ def run_sql_question(
     )
 
 
+# ── Tool Use / Function Calling Mode ────────────────────────────────────────
+
+SQL_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "run_sql_query",
+        "description": "Execute a SQL SELECT query against the database and return results.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "sql": {"type": "string", "description": "A valid SQLite SELECT query"},
+            },
+            "required": ["sql"],
+        },
+    },
+}
+
+_TOOL_SYSTEM_PROMPT = (
+    "You are a SQL expert with access to a SQLite database. "
+    "Use the run_sql_query tool to execute queries and answer the user's question.\n\n"
+    f"Database schema:\n```sql\n{SCHEMA_DDL}```\n\n{SCHEMA_DESCRIPTION}"
+)
+
+
+def run_sql_question_tool_use(
+    conn: sqlite3.Connection,
+    question: SQLQuestion,
+    base_url: str,
+    model: str,
+    api_key: str | None = None,
+    max_retries: int = 3,
+) -> SQLTaskResult:
+    """Run a single SQL question using tool use / function calling.
+
+    The model calls run_sql_query, we execute it, return results,
+    and the model can inspect and retry.
+    """
+    messages: list[dict] = [
+        {"role": "system", "content": _TOOL_SYSTEM_PROMPT},
+        {"role": "user", "content": question.question},
+    ]
+    last_sql = ""
+    last_error = ""
+    total_time = 0.0
+    prompt_tok = 0
+    comp_tok = 0
+
+    for attempt in range(1 + max_retries):
+        try:
+            msg, pt, ct, ms = call_openai_with_tools(
+                base_url, model, messages, [SQL_TOOL],
+                api_key=api_key, max_tokens=1024, temperature=0.0,
+            )
+            total_time += ms
+            prompt_tok += pt
+            comp_tok += ct
+        except Exception as e:
+            return SQLTaskResult(
+                question_id=question.id, question=question.question,
+                difficulty=question.difficulty, model=model,
+                status="error", error_message=f"API error: {e}",
+            )
+
+        # Check for tool calls
+        tool_calls = msg.get("tool_calls", [])
+        if tool_calls:
+            tc = tool_calls[0]
+            try:
+                args = json.loads(tc["function"]["arguments"])
+                sql = args.get("sql", "")
+            except (json.JSONDecodeError, KeyError):
+                sql = ""
+
+            if not sql:
+                messages.append(msg)
+                messages.append({
+                    "role": "tool", "tool_call_id": tc["id"],
+                    "content": "Error: no SQL provided in tool call",
+                })
+                continue
+
+            last_sql = sql
+            try:
+                actual_cols, actual_rows = execute_sql_safe(conn, sql)
+            except (ValueError, sqlite3.Error) as e:
+                last_error = str(e)
+                messages.append(msg)
+                messages.append({
+                    "role": "tool", "tool_call_id": tc["id"],
+                    "content": f"Error executing SQL: {e}\nPlease fix and try again.",
+                })
+                continue
+
+            # Check results
+            match, reason = compare_results(
+                question.expected_columns, question.expected_result,
+                actual_cols, actual_rows,
+                order_matters=question.order_matters,
+            )
+
+            if match:
+                tps = comp_tok / (total_time / 1000) if total_time > 0 else 0
+                return SQLTaskResult(
+                    question_id=question.id, question=question.question,
+                    difficulty=question.difficulty, model=model,
+                    status="pass", score=1.0, generated_sql=sql,
+                    actual_result=list(actual_rows),
+                    actual_columns=actual_cols,
+                    expected_result=question.expected_result,
+                    expected_columns=question.expected_columns,
+                    speed_tps=tps, total_ms=total_time,
+                    retries=attempt,
+                    complexity=_analyze_sql_complexity(sql),
+                )
+            else:
+                last_error = reason
+                # Send result summary back so model can inspect and retry
+                row_preview = str(actual_rows[:5]) if actual_rows else "empty"
+                messages.append(msg)
+                messages.append({
+                    "role": "tool", "tool_call_id": tc["id"],
+                    "content": (
+                        f"Query returned {len(actual_rows)} rows: {row_preview}\n"
+                        f"Expected {len(question.expected_result)} rows.\n"
+                        f"Issue: {reason}\nPlease try a different query."
+                    ),
+                })
+        else:
+            # No tool call — try regex extraction as fallback
+            content = msg.get("content", "")
+            sql = extract_sql(content)
+            if sql:
+                last_sql = sql
+                try:
+                    actual_cols, actual_rows = execute_sql_safe(conn, sql)
+                    match, reason = compare_results(
+                        question.expected_columns, question.expected_result,
+                        actual_cols, actual_rows,
+                        order_matters=question.order_matters,
+                    )
+                    if match:
+                        tps = comp_tok / (total_time / 1000) if total_time > 0 else 0
+                        return SQLTaskResult(
+                            question_id=question.id, question=question.question,
+                            difficulty=question.difficulty, model=model,
+                            status="pass", score=1.0, generated_sql=sql,
+                            actual_result=list(actual_rows),
+                            actual_columns=actual_cols,
+                            expected_result=question.expected_result,
+                            expected_columns=question.expected_columns,
+                            speed_tps=tps, total_ms=total_time,
+                            retries=attempt,
+                            complexity=_analyze_sql_complexity(sql),
+                        )
+                    last_error = reason
+                except (ValueError, sqlite3.Error) as e:
+                    last_error = str(e)
+            else:
+                last_error = "Model did not use tool or generate SQL"
+            # Ask model to use the tool
+            messages.append(msg)
+            messages.append({
+                "role": "user",
+                "content": "Please use the run_sql_query tool to answer the question.",
+            })
+
+    # All attempts exhausted
+    return SQLTaskResult(
+        question_id=question.id, question=question.question,
+        difficulty=question.difficulty, model=model,
+        status="fail" if last_sql else "error",
+        generated_sql=last_sql, error_message=last_error,
+        total_ms=total_time, retries=max_retries,
+        complexity=_analyze_sql_complexity(last_sql) if last_sql else {},
+    )
+
+
 def run_sql_benchmark(
     base_url: str,
     models: list[str],
@@ -1347,6 +1524,7 @@ def run_sql_benchmark(
     difficulties: list[str] | None = None,
     max_retries: int = 2,
     progress_callback: Any = None,
+    mode: str = "auto",
 ) -> list[SQLTaskResult]:
     """Run SQL benchmark against specified models.
 
@@ -1385,10 +1563,27 @@ def run_sql_benchmark(
                 tier_label = f"[{question.difficulty:>7}]"
                 print(f"  {tier_label} Q{question.id}: {question.question[:55]}...", end=" ", flush=True)
 
-                result = run_sql_question(
-                    conn, question, base_url, model,
-                    api_key=api_key, max_retries=max_retries,
-                )
+                if mode == "tool-use":
+                    result = run_sql_question_tool_use(
+                        conn, question, base_url, model,
+                        api_key=api_key, max_retries=max_retries,
+                    )
+                elif mode == "prompt":
+                    result = run_sql_question(
+                        conn, question, base_url, model,
+                        api_key=api_key, max_retries=max_retries,
+                    )
+                else:  # auto — try tool use, fall back to prompt
+                    try:
+                        result = run_sql_question_tool_use(
+                            conn, question, base_url, model,
+                            api_key=api_key, max_retries=max_retries,
+                        )
+                    except Exception:
+                        result = run_sql_question(
+                            conn, question, base_url, model,
+                            api_key=api_key, max_retries=max_retries,
+                        )
                 results.append(result)
 
                 status_color = {"pass": "\033[32m", "fail": "\033[31m", "error": "\033[33m"}
