@@ -606,10 +606,10 @@ class TestSearchHuggingface:
             model = search_huggingface("llama mlx")[0]
         assert model.is_mlx is True
 
-    def test_returns_empty_list_on_network_error(self):
+    def test_raises_on_network_error(self):
         with patch("urllib.request.urlopen", side_effect=OSError("network down")):
-            result = search_huggingface("llama")
-        assert result == []
+            with pytest.raises(OSError):
+                search_huggingface("llama")
 
     def test_returns_empty_list_on_json_error(self):
         cm = MagicMock()
@@ -735,10 +735,10 @@ class TestGetModelFiles:
         gguf = next(f for f in files if f["filename"] == "model.Q4_K_M.gguf")
         assert gguf["size"] == 4_000_000_000
 
-    def test_returns_empty_list_on_network_error(self):
+    def test_raises_on_network_error(self):
         with patch("urllib.request.urlopen", side_effect=OSError("timeout")):
-            result = get_model_files("some/repo")
-        assert result == []
+            with pytest.raises(OSError):
+                get_model_files("some/repo")
 
     def test_returns_empty_list_when_no_siblings(self):
         mock_resp = _make_urlopen_mock({"siblings": []})

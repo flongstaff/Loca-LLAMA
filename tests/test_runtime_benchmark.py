@@ -1012,21 +1012,27 @@ class TestDetectLmStudio:
 
 class TestDetectAllRuntimes:
     def test_should_return_empty_list_when_no_runtimes_detected(self):
-        with patch("loca_llama.benchmark.detect_lm_studio", return_value=None), \
+        with patch("loca_llama.benchmark.detect_omlx", return_value=None), \
+             patch("loca_llama.benchmark.detect_litellm", return_value=None), \
+             patch("loca_llama.benchmark.detect_lm_studio", return_value=None), \
              patch("loca_llama.benchmark.detect_llama_cpp_server", return_value=None):
             result = detect_all_runtimes()
         assert result == []
 
     def test_should_include_lm_studio_when_detected(self):
         lms = RuntimeInfo(name="lm-studio", url="http://127.0.0.1:1234", models=["m"])
-        with patch("loca_llama.benchmark.detect_lm_studio", return_value=lms), \
+        with patch("loca_llama.benchmark.detect_omlx", return_value=None), \
+             patch("loca_llama.benchmark.detect_litellm", return_value=None), \
+             patch("loca_llama.benchmark.detect_lm_studio", return_value=lms), \
              patch("loca_llama.benchmark.detect_llama_cpp_server", return_value=None):
             result = detect_all_runtimes()
         assert lms in result
 
     def test_should_include_llama_cpp_when_detected(self):
         lcp = RuntimeInfo(name="llama.cpp-server", url="http://127.0.0.1:8080", models=["m"])
-        with patch("loca_llama.benchmark.detect_lm_studio", return_value=None), \
+        with patch("loca_llama.benchmark.detect_omlx", return_value=None), \
+             patch("loca_llama.benchmark.detect_litellm", return_value=None), \
+             patch("loca_llama.benchmark.detect_lm_studio", return_value=None), \
              patch("loca_llama.benchmark.detect_llama_cpp_server", return_value=lcp):
             result = detect_all_runtimes()
         assert lcp in result
@@ -1034,7 +1040,9 @@ class TestDetectAllRuntimes:
     def test_should_return_both_runtimes_when_both_detected(self):
         lms = RuntimeInfo(name="lm-studio", url="http://127.0.0.1:1234", models=["m"])
         lcp = RuntimeInfo(name="llama.cpp-server", url="http://127.0.0.1:8080", models=["m"])
-        with patch("loca_llama.benchmark.detect_lm_studio", return_value=lms), \
+        with patch("loca_llama.benchmark.detect_omlx", return_value=None), \
+             patch("loca_llama.benchmark.detect_litellm", return_value=None), \
+             patch("loca_llama.benchmark.detect_lm_studio", return_value=lms), \
              patch("loca_llama.benchmark.detect_llama_cpp_server", return_value=lcp):
             result = detect_all_runtimes()
         assert len(result) == 2
