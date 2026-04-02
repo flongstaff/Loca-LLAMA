@@ -10,31 +10,13 @@ from __future__ import annotations
 import html
 import json
 import platform
-import re
 from typing import Any
 
+from .benchmark_results import categorize_model, CATEGORY_ORDER
 from .sql_bench import (
     SQLTaskResult, DIFFICULTY_ORDER, SCHEMA_DDL, QUESTIONS,
-    _generate_seed_json,
+    generate_seed_json,
 )
-
-_CLOUD_RUNTIMES = {"openrouter", "litellm", "openai", "anthropic", "together"}
-_CATEGORY_ORDER = ["Cloud API", "Local (Large)", "Local (Medium)", "Local (Small)", "Local"]
-
-
-def _categorize_model(model: str, runtime: str) -> str:
-    """Infer model category from runtime and model name."""
-    if any(r in runtime.lower() for r in _CLOUD_RUNTIMES):
-        return "Cloud API"
-    match = re.search(r"(\d+)[Bb]", model)
-    if match:
-        params = int(match.group(1))
-        if params >= 30:
-            return "Local (Large)"
-        if params >= 13:
-            return "Local (Medium)"
-        return "Local (Small)"
-    return "Local"
 
 
 def generate_sql_report(
@@ -71,11 +53,11 @@ def generate_sql_report(
     runtime_str = meta.get("runtime", "")
     grouped_models: dict[str, list[str]] = {}
     for model in models:
-        cat = _categorize_model(model, runtime_str)
+        cat = categorize_model(model, runtime_str)
         grouped_models.setdefault(cat, []).append(model)
 
     num_cols = 6 + len(difficulties)  # model + score + diffs + tps + ttft + time + retries
-    for cat in _CATEGORY_ORDER:
+    for cat in CATEGORY_ORDER:
         cat_models = grouped_models.get(cat)
         if not cat_models:
             continue
@@ -237,7 +219,7 @@ def generate_sql_report(
     }).replace("</", r"<\/")
 
     # ── DuckDB-WASM playground data ──────────────────────────────────────
-    seed_data_json = json.dumps(_generate_seed_json()).replace("</", r"<\/")
+    seed_data_json = json.dumps(generate_seed_json()).replace("</", r"<\/")
     schema_ddl_safe = html.escape(SCHEMA_DDL.strip())
     playground_questions = json.dumps([
         {"id": q.id, "difficulty": q.difficulty, "question": q.question,
@@ -776,13 +758,16 @@ def generate_sql_report(
     items.forEach((item, i) => {{
       const x = pad.left + i * gap + (gap - barW) / 2;
       let y = pad.top + plotH;
-      ['pass', 'fail', 'error'].forEach(key => {{
+      const keys = ['pass', 'fail', 'error'];
+      // Find the topmost (last drawn) segment for rounded corners
+      const lastKey = keys.filter(k => item[k] > 0).pop();
+      keys.forEach(key => {{
         const h = (item[key] / maxVal) * plotH;
         if (h > 0) {{
           y -= h;
           ctx.fillStyle = colors[key];
           ctx.beginPath();
-          ctx.roundRect(x, y, barW, h, key === 'error' || key === 'fail' ? [0,0,0,0] : [4,4,0,0]);
+          ctx.roundRect(x, y, barW, h, key === lastKey ? [4,4,0,0] : [0,0,0,0]);
           ctx.fill();
         }}
       }});
@@ -896,31 +881,26 @@ def generate_sql_report(
       // Create schema
       await conn.query(SCHEMA);
 
-      // Seed data using INSERT statements
+      // Seed data using batched INSERT statements
       status.textContent = 'Seeding data...';
-      for (const row of SEED.customers) {{
-        await conn.query(
-          `INSERT INTO customers VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-          row
-        );
+      function esc(v) {{ return typeof v === 'string' ? "'" + v.replace(/'/g, "''") + "'" : String(v); }}
+      function batchInsert(table, rows, batchSize) {{
+        const stmts = [];
+        for (let i = 0; i < rows.length; i += batchSize) {{
+          const chunk = rows.slice(i, i + batchSize);
+          const vals = chunk.map(r => '(' + r.map(esc).join(',') + ')').join(',');
+          stmts.push('INSERT INTO ' + table + ' VALUES ' + vals);
+        }}
+        return stmts;
       }}
-      for (const row of SEED.products) {{
-        await conn.query(
-          `INSERT INTO products VALUES ($1,$2,$3,$4,$5,$6)`,
-          row
-        );
-      }}
-      for (const row of SEED.orders) {{
-        await conn.query(
-          `INSERT INTO orders VALUES ($1,$2,$3,$4,$5)`,
-          row
-        );
-      }}
-      for (const row of SEED.order_items) {{
-        await conn.query(
-          `INSERT INTO order_items VALUES ($1,$2,$3,$4,$5,$6)`,
-          row
-        );
+      const allStmts = [
+        ...batchInsert('customers', SEED.customers, 50),
+        ...batchInsert('products', SEED.products, 50),
+        ...batchInsert('orders', SEED.orders, 50),
+        ...batchInsert('order_items', SEED.order_items, 100),
+      ];
+      for (const sql of allStmts) {{
+        await conn.query(sql);
       }}
       status.textContent = 'Database ready. ' + SEED.customers.length + ' customers, '
         + SEED.products.length + ' products, ' + SEED.orders.length + ' orders loaded.';

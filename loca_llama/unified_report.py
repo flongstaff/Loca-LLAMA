@@ -16,33 +16,13 @@ from __future__ import annotations
 import html
 import json
 import platform
-import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from .benchmark_results import BenchmarkRecord, load_results
-
-# ── Helpers ───────────────────────────────────────────────────────────────
-
-_CLOUD_RUNTIMES = {"openrouter", "litellm", "openai", "anthropic", "together"}
-
-_CATEGORY_ORDER = ["Cloud API", "Local (Large)", "Local (Medium)", "Local (Small)", "Local"]
-
-
-def _categorize_model(model: str, runtime: str) -> str:
-    """Infer model category from runtime and model name."""
-    if any(r in runtime.lower() for r in _CLOUD_RUNTIMES):
-        return "Cloud API"
-    match = re.search(r"(\d+)[Bb]", model)
-    if match:
-        params = int(match.group(1))
-        if params >= 30:
-            return "Local (Large)"
-        if params >= 13:
-            return "Local (Medium)"
-        return "Local (Small)"
-    return "Local"
+from .benchmark_results import (
+    BenchmarkRecord, load_results, categorize_model, CATEGORY_ORDER,
+)
 
 
 # ── Data Loading & Normalization ──────────────────────────────────────────
@@ -277,10 +257,10 @@ def _section_leaderboard(scorecards: list[ModelScorecard]) -> str:
     # Group by category, maintaining score order within each group
     grouped: dict[str, list[ModelScorecard]] = {}
     for c in scorecards:
-        cat = _categorize_model(c.model, c.runtime)
+        cat = categorize_model(c.model, c.runtime)
         grouped.setdefault(cat, []).append(c)
 
-    for cat in _CATEGORY_ORDER:
+    for cat in CATEGORY_ORDER:
         cat_cards = grouped.get(cat)
         if not cat_cards:
             continue

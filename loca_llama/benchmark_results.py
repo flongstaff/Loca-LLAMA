@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import platform
+import re
 import tempfile
 import time
 from dataclasses import dataclass, field, asdict
@@ -16,6 +17,31 @@ from typing import Any
 
 
 RESULTS_DIR = Path.home() / ".loca-llama" / "results"
+
+# ── Model Categorization ─────────────────────────────────────────────────
+
+_CLOUD_RUNTIMES = {"openrouter", "litellm", "openai", "anthropic", "together"}
+
+CATEGORY_ORDER = ["Cloud API", "Local (Large)", "Local (Medium)", "Local (Small)", "Local"]
+
+
+def categorize_model(model: str, runtime: str) -> str:
+    """Infer model category from runtime and model name.
+
+    Returns one of: 'Cloud API', 'Local (Large)', 'Local (Medium)',
+    'Local (Small)', or 'Local'.
+    """
+    if any(r in runtime.lower() for r in _CLOUD_RUNTIMES):
+        return "Cloud API"
+    match = re.search(r"(\d+)[Bb]", model)
+    if match:
+        params = int(match.group(1))
+        if params >= 30:
+            return "Local (Large)"
+        if params >= 13:
+            return "Local (Medium)"
+        return "Local (Small)"
+    return "Local"
 
 
 def detect_hardware_string() -> str:

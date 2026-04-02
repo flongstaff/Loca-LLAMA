@@ -229,7 +229,7 @@ def _generate_seed_sql() -> str:
     return "\n".join(stmts)
 
 
-def _generate_seed_json() -> dict[str, list[list[Any]]]:
+def generate_seed_json() -> dict[str, list[list[Any]]]:
     """Generate deterministic seed data as JSON arrays for DuckDB-WASM.
 
     Returns dict with table names as keys and lists of row-arrays as values.
