@@ -109,7 +109,7 @@ def detect_litellm() -> RuntimeInfo | None:
 def detect_omlx() -> RuntimeInfo | None:
     """Check if oMLX server is running."""
     url = os.environ.get("OMLX_URL", "http://127.0.0.1:8000")
-    api_key = os.environ.get("OMLX_API_KEY", "9514")
+    api_key = os.environ.get("OMLX_API_KEY")
     try:
         with urllib.request.urlopen(f"{url}/health", timeout=2) as resp:
             data = json.loads(resp.read().decode())

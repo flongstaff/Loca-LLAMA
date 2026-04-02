@@ -9,7 +9,6 @@ from __future__ import annotations
 import ast
 import subprocess
 import sys
-from typing import Tuple
 
 # Modules that could damage the host system or exfiltrate data
 _BLOCKED_MODULES = frozenset({
@@ -19,6 +18,9 @@ _BLOCKED_MODULES = frozenset({
     "webbrowser", "antigravity", "turtle", "tkinter",
     "pickle", "shelve", "marshal", "code", "codeop",
     "compileall", "py_compile",
+    # Additional sandbox escape vectors
+    "sys", "builtins", "io", "zipimport", "runpy",
+    "_thread", "concurrent", "asyncio",
 })
 
 # Built-in functions/names that enable code injection or system access
@@ -26,6 +28,9 @@ _BLOCKED_CALLS = frozenset({
     "eval", "exec", "compile", "__import__", "breakpoint",
     "exit", "quit", "globals", "locals", "vars",
     "getattr", "setattr", "delattr",
+    # Additional sandbox escape vectors
+    "open", "type", "super", "memoryview", "bytearray",
+    "__build_class__",
 })
 
 # Attribute access patterns that bypass import restrictions
@@ -33,6 +38,9 @@ _BLOCKED_ATTRS = frozenset({
     "system", "popen", "exec", "spawn",
     "__subclasses__", "__bases__", "__globals__",
     "__builtins__", "__code__", "__import__",
+    # Additional sandbox escape vectors
+    "__mro__", "__class__", "__dict__", "__init_subclass__",
+    "__module__", "__qualname__", "__loader__", "__spec__",
 })
 
 
@@ -86,6 +94,11 @@ def _check_module(module_name: str) -> None:
         raise UnsafeCodeError(f"Blocked import: {module_name}")
 
 
+def _sandbox_env() -> dict[str, str]:
+    """Minimal environment for sandboxed subprocess."""
+    return {"PATH": "", "HOME": "/tmp", "LANG": "en_US.UTF-8"}
+
+
 def run_code_safe(code: str, timeout: int = 10) -> bool:
     """Validate and execute Python code in a subprocess sandbox.
 
@@ -95,10 +108,12 @@ def run_code_safe(code: str, timeout: int = 10) -> bool:
 
     try:
         result = subprocess.run(
-            [sys.executable, "-c", code],
+            [sys.executable, "-I", "-c", code],
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=_sandbox_env(),
+            cwd="/tmp",
         )
         return result.returncode == 0
     except subprocess.TimeoutExpired:
@@ -107,7 +122,7 @@ def run_code_safe(code: str, timeout: int = 10) -> bool:
 
 def run_code_safe_with_output(
     code: str, timeout: int = 10
-) -> Tuple[bool, str, str]:
+) -> tuple[bool, str, str]:
     """Validate and execute code, returning (success, stdout, stderr).
 
     Returns (False, "", error_message) if validation fails.
@@ -119,10 +134,12 @@ def run_code_safe_with_output(
 
     try:
         result = subprocess.run(
-            [sys.executable, "-c", code],
+            [sys.executable, "-I", "-c", code],
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=_sandbox_env(),
+            cwd="/tmp",
         )
         return (
             result.returncode == 0,

@@ -671,25 +671,43 @@ def extract_sql(text: str) -> str:
 _BLOCKED_PREFIXES = ("INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "ATTACH", "DETACH", "PRAGMA")
 
 
+_MAX_SQL_LENGTH = 4096
+
+
 def execute_sql_safe(
     conn: sqlite3.Connection, sql: str, timeout: float = 5.0
 ) -> tuple[list[str], list[tuple]]:
-    """Execute a SQL query safely. Only SELECT is allowed.
+    """Execute a SQL query safely. Only SELECT/WITH queries are allowed.
 
     Returns (column_names, rows).
     Raises ValueError for blocked statements, sqlite3.Error for execution errors.
     """
-    stripped = sql.strip().upper()
-    for prefix in _BLOCKED_PREFIXES:
-        if stripped.startswith(prefix):
-            raise ValueError(f"Blocked SQL statement: {prefix}")
+    if len(sql) > _MAX_SQL_LENGTH:
+        raise ValueError(f"SQL too long ({len(sql)} chars, max {_MAX_SQL_LENGTH})")
 
-    # Use a timeout by setting busy_timeout (though in-memory DBs don't really block)
-    conn.execute(f"PRAGMA busy_timeout = {int(timeout * 1000)}")
+    stripped = sql.strip()
+    upper = stripped.upper()
+
+    # Only allow SELECT or WITH (CTEs)
+    if not re.match(r"^(SELECT|WITH)\b", upper):
+        raise ValueError("Only SELECT/WITH queries are allowed")
+
+    # Reject multiple statements (semicolons not at end)
+    core = stripped.rstrip(";").strip()
+    if ";" in core:
+        raise ValueError("Multiple SQL statements not allowed")
+
+    # Block dangerous functions
+    if "LOAD_EXTENSION" in upper:
+        raise ValueError("load_extension is not allowed")
+
+    for prefix in _BLOCKED_PREFIXES:
+        if upper.startswith(prefix):
+            raise ValueError(f"Blocked SQL statement: {prefix}")
 
     cursor = conn.execute(sql)
     columns = [desc[0].lower() for desc in cursor.description] if cursor.description else []
-    rows = cursor.fetchall()
+    rows = cursor.fetchmany(10000)  # Cap row count
     return columns, rows
 
 

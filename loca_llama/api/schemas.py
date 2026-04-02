@@ -288,6 +288,8 @@ class LlamaCppCommandRequest(BaseModel):
                 "model_path must only contain alphanumeric characters, "
                 "dots, underscores, slashes, hyphens, and spaces"
             )
+        if ".." in v.split("/"):
+            raise ValueError("model_path must not contain '..' path traversal")
         return v
 
 

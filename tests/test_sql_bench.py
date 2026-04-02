@@ -131,19 +131,19 @@ class TestExecuteSqlSafe:
 
     def test_blocks_insert(self) -> None:
         conn = create_benchmark_db()
-        with pytest.raises(ValueError, match="Blocked SQL"):
+        with pytest.raises(ValueError, match="Only SELECT"):
             execute_sql_safe(conn, "INSERT INTO customers VALUES (999, 'x', 'x', 'x', 'x', 'x', '2024-01-01');")
         conn.close()
 
     def test_blocks_drop(self) -> None:
         conn = create_benchmark_db()
-        with pytest.raises(ValueError, match="Blocked SQL"):
+        with pytest.raises(ValueError, match="Only SELECT"):
             execute_sql_safe(conn, "DROP TABLE customers;")
         conn.close()
 
     def test_blocks_delete(self) -> None:
         conn = create_benchmark_db()
-        with pytest.raises(ValueError, match="Blocked SQL"):
+        with pytest.raises(ValueError, match="Only SELECT"):
             execute_sql_safe(conn, "DELETE FROM customers;")
         conn.close()
 
@@ -157,6 +157,39 @@ class TestExecuteSqlSafe:
         conn = create_benchmark_db()
         with pytest.raises(sqlite3.Error):
             execute_sql_safe(conn, "SELECT * FROM nonexistent_table;")
+        conn.close()
+
+    def test_blocks_load_extension(self) -> None:
+        conn = create_benchmark_db()
+        with pytest.raises(ValueError, match="load_extension"):
+            execute_sql_safe(conn, "SELECT load_extension('/tmp/evil.so');")
+        conn.close()
+
+    def test_blocks_multiple_statements(self) -> None:
+        conn = create_benchmark_db()
+        with pytest.raises(ValueError, match="Multiple SQL"):
+            execute_sql_safe(conn, "SELECT 1; DROP TABLE customers;")
+        conn.close()
+
+    def test_blocks_long_sql(self) -> None:
+        conn = create_benchmark_db()
+        long_sql = "SELECT " + ", ".join(["1"] * 2000)
+        with pytest.raises(ValueError, match="SQL too long"):
+            execute_sql_safe(conn, long_sql)
+        conn.close()
+
+    def test_allows_with_cte(self) -> None:
+        conn = create_benchmark_db()
+        cols, rows = execute_sql_safe(
+            conn, "WITH t AS (SELECT 1 AS x) SELECT x FROM t;"
+        )
+        assert rows[0][0] == 1
+        conn.close()
+
+    def test_rejects_non_select(self) -> None:
+        conn = create_benchmark_db()
+        with pytest.raises(ValueError, match="Only SELECT"):
+            execute_sql_safe(conn, "PRAGMA table_info(customers);")
         conn.close()
 
 
@@ -209,10 +242,10 @@ class TestCompareResults:
 
     def test_float_tolerance(self) -> None:
         match, _ = compare_results(
-            ["val"], [(1.005,)],
-            ["val"], [(1.01,)],
+            ["val"], [(100.0,)],
+            ["val"], [(100.5,)],
         )
-        assert match is True  # Both round to 1.01
+        assert match is True  # 0.5% relative difference, within 1% tolerance
 
     def test_case_insensitive_strings(self) -> None:
         match, _ = compare_results(

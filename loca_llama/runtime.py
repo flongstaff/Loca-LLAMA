@@ -281,7 +281,7 @@ class LiteLLMConnector:
             data=payload,
             headers={
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {os.environ.get('LITELLM_API_KEY', 'sk-local')}",
+                "Authorization": f"Bearer {os.environ.get('LITELLM_API_KEY', '')}",
             },
             method="POST",
         )
