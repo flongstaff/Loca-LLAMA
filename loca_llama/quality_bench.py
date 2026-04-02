@@ -265,11 +265,14 @@ def call_openai_api(
     max_tokens: int = 2048,
     temperature: float = 0.6,
     system_prompt: str = "You are a senior Python engineer. Write clean, correct, typed code. Be concise.",
-) -> tuple[str, float, float, float]:
+) -> tuple[str, float, float, float, int, int]:
     """Call any OpenAI-compatible API with SSE streaming.
 
-    Returns (response_text, tokens_per_second, ttft_ms, total_ms).
+    Returns (response_text, tokens_per_second, ttft_ms, total_ms, prompt_tokens, completion_tokens).
     Works with oMLX, LM Studio, OpenRouter, or any OpenAI-compatible endpoint.
+
+    Token counts are sourced from the SSE usage chunk when available (stream_options
+    usage=true), falling back to counting content delta chunks.
     """
     url = f"{base_url}/v1/chat/completions"
     payload = json.dumps({
@@ -295,6 +298,8 @@ def call_openai_api(
     ttft = 0.0
     tokens_generated = 0
     response_text = ""
+    prompt_tokens = 0
+    completion_tokens = 0
 
     req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
     with urllib.request.urlopen(req, timeout=120) as resp:
@@ -310,6 +315,11 @@ def call_openai_api(
                 if "error" in chunk:
                     logger.warning("API error in SSE stream: %s", chunk["error"])
                     continue
+                # Extract usage from final chunk (some providers send this)
+                usage = chunk.get("usage")
+                if usage:
+                    prompt_tokens = usage.get("prompt_tokens", prompt_tokens)
+                    completion_tokens = usage.get("completion_tokens", completion_tokens)
                 delta = chunk["choices"][0].get("delta", {})
                 content = delta.get("content", "")
                 if content:
@@ -322,7 +332,10 @@ def call_openai_api(
 
     total_ms = (time.monotonic() - start) * 1000
     tps = tokens_generated / (total_ms / 1000) if total_ms > 0 else 0
-    return response_text, tps, ttft, total_ms
+    # Use delta-count as fallback when provider doesn't send usage chunk
+    if completion_tokens == 0:
+        completion_tokens = tokens_generated
+    return response_text, tps, ttft, total_ms, prompt_tokens, completion_tokens
 
 
 # --- Code Extraction & Scoring ---
@@ -440,7 +453,7 @@ def run_quality_benchmark(
             print(f"  [{task['category']}] {task['name']}...", end=" ", flush=True)
 
             try:
-                response, tps, ttft, total_ms = call_openai_api(
+                response, tps, ttft, total_ms, _, _ = call_openai_api(
                     base_url, model, task["prompt"], api_key=api_key,
                 )
                 contains_score, runnable_score, error = score_task(task, response)

@@ -268,8 +268,8 @@ class TestCompareResults:
 class TestQuestions:
     """Tests for the question definitions."""
 
-    def test_has_25_questions(self) -> None:
-        assert len(QUESTIONS) == 25
+    def test_has_33_questions(self) -> None:
+        assert len(QUESTIONS) == 33
 
     def test_has_all_difficulties(self) -> None:
         difficulties = {q.difficulty for q in QUESTIONS}
@@ -285,7 +285,7 @@ class TestQuestions:
         assert sum(1 for q in QUESTIONS if q.difficulty == "medium") == 9
 
     def test_hard_count(self) -> None:
-        assert sum(1 for q in QUESTIONS if q.difficulty == "hard") == 7
+        assert sum(1 for q in QUESTIONS if q.difficulty == "hard") == 15
 
     def test_all_have_expected_results(self) -> None:
         for q in QUESTIONS:

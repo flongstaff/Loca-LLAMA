@@ -124,6 +124,11 @@ class BenchmarkRecord:
     cloud_provider: str = ""  # "pi", "claude", ""
     cloud_scores: dict[str, Any] = field(default_factory=dict)
 
+    # Benchmark settings that produced this result
+    # Conventions: temperature, max_tokens, context_length, gpu_layers,
+    #   top_p, repeat_penalty, prompt_type, num_runs, concurrency, difficulty
+    settings: dict[str, Any] = field(default_factory=dict)
+
     # Extra metadata
     # Conventions: extra["cost_cents"] = total cost in cents for the run
     #              extra["cost_per_1k_tokens"] = cost per 1k tokens

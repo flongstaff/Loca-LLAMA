@@ -15,6 +15,7 @@ Usage (via CLI):
 
 from __future__ import annotations
 
+import datetime
 import random
 import re
 import sqlite3
@@ -63,6 +64,21 @@ CREATE TABLE order_items (
     unit_price REAL NOT NULL,
     discount REAL NOT NULL DEFAULT 0.0
 );
+
+CREATE TABLE categories (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    parent_id INTEGER REFERENCES categories(id)
+);
+
+CREATE TABLE returns (
+    id INTEGER PRIMARY KEY,
+    order_id INTEGER NOT NULL REFERENCES orders(id),
+    product_id INTEGER NOT NULL REFERENCES products(id),
+    reason TEXT NOT NULL,
+    refund_amount REAL NOT NULL,
+    return_date TEXT NOT NULL
+);
 """
 
 SCHEMA_DESCRIPTION = """\
@@ -71,11 +87,16 @@ Tables:
 - products (id, name, category, subcategory, price, cost)
 - orders (id, customer_id, order_date, status, total_amount)
 - order_items (id, order_id, product_id, quantity, unit_price, discount)
+- categories (id, name, parent_id) -- hierarchical; parent_id NULL means top-level
+- returns (id, order_id, product_id, reason, refund_amount, return_date)
 
 Relationships:
 - orders.customer_id → customers.id
 - order_items.order_id → orders.id
 - order_items.product_id → products.id
+- categories.parent_id → categories.id (self-referential)
+- returns.order_id → orders.id
+- returns.product_id → products.id
 """
 
 
@@ -226,6 +247,81 @@ def _generate_seed_sql() -> str:
         )
         stmts.extend(item_stmts)
 
+    # Categories (hierarchical)
+    categories = [
+        (1, "Electronics", "NULL"),
+        (2, "Home", "NULL"),
+        (3, "Sports", "NULL"),
+        (4, "Audio", "1"),
+        (5, "Wearables", "1"),
+        (6, "Kitchen", "2"),
+        (7, "Decor", "2"),
+        (8, "Fitness", "3"),
+    ]
+    for cat_id, cat_name, parent in categories:
+        stmts.append(
+            f"INSERT INTO categories VALUES ({cat_id}, '{cat_name}', {parent});"
+        )
+
+    # Returns (~50 deterministic)
+    # Need to know which order_items exist; rebuild the minimal info using same rng seed
+    # We already consumed the rng above, so replay order generation to collect item records
+    rng2 = random.Random(42)
+    # Replay customers (100 choices)
+    for _ in range(100):
+        rng2.choice(_FIRST_NAMES)
+        rng2.choice(_LAST_NAMES)
+        rng2.choice(_CITIES)
+        rng2.choice([2022, 2023, 2024])
+        rng2.randint(1, 12)
+        rng2.randint(1, 28)
+    # Replay orders to collect (order_id, product_id, qty, unit_price, discount, order_date)
+    _order_items_info: list[tuple[int, int, int, float, float, str]] = []
+    _order_dates: dict[int, str] = {}
+    statuses2 = ["completed", "completed", "completed", "completed", "shipped", "pending", "cancelled"]
+    oid2 = 0
+    iid2 = 0
+    for _ in range(500):
+        oid2 += 1
+        rng2.randint(1, 100)
+        year2 = rng2.choice([2023, 2024, 2024, 2024, 2025, 2025])
+        month2 = rng2.randint(1, 12)
+        day2 = rng2.randint(1, 28)
+        odate2 = f"{year2}-{month2:02d}-{day2:02d}"
+        _order_dates[oid2] = odate2
+        rng2.choice(statuses2)
+        num_items2 = rng2.randint(1, 5)
+        used2: set[int] = set()
+        for _ in range(num_items2):
+            pid2 = rng2.randint(1, len(_PRODUCT_CATALOG))
+            if pid2 in used2:
+                continue
+            used2.add(pid2)
+            qty2 = rng2.randint(1, 3)
+            up2 = _PRODUCT_CATALOG[pid2 - 1][3]
+            disc2 = rng2.choice([0.0, 0.0, 0.0, 0.05, 0.10, 0.15])
+            iid2 += 1
+            _order_items_info.append((oid2, pid2, qty2, up2, disc2, odate2))
+
+    _return_reasons = ["defective", "wrong_item", "not_as_described", "changed_mind", "too_expensive"]
+    rng3 = random.Random(42)
+    for ret_id in range(1, 51):
+        item = rng3.choice(_order_items_info)
+        ret_order_id, ret_prod_id, ret_qty, ret_up, ret_disc, ret_odate = item
+        line_total = ret_qty * ret_up * (1 - ret_disc)
+        refund_pct = rng3.uniform(0.80, 1.00)
+        refund_amt = round(line_total * refund_pct, 2)
+        reason = rng3.choice(_return_reasons)
+        # return date: 1-30 days after order date
+        days_after = rng3.randint(1, 30)
+        ret_date = (
+            datetime.date.fromisoformat(ret_odate) + datetime.timedelta(days=days_after)
+        ).isoformat()
+        stmts.append(
+            f"INSERT INTO returns VALUES ({ret_id}, {ret_order_id}, {ret_prod_id}, "
+            f"'{reason}', {refund_amt}, '{ret_date}');"
+        )
+
     return "\n".join(stmts)
 
 
@@ -289,11 +385,75 @@ def generate_seed_json() -> dict[str, list[list[Any]]]:
         orders.append([order_id, cust_id, order_date, status, total])
         order_items.extend(batch)
 
+    # Categories (hierarchical, fixed)
+    categories_data: list[list[Any]] = [
+        [1, "Electronics", None],
+        [2, "Home", None],
+        [3, "Sports", None],
+        [4, "Audio", 1],
+        [5, "Wearables", 1],
+        [6, "Kitchen", 2],
+        [7, "Decor", 2],
+        [8, "Fitness", 3],
+    ]
+
+    # Returns (~50 deterministic) — replay order items
+    _order_items_info2: list[tuple[int, int, int, float, float, str]] = []
+    rng2 = random.Random(42)
+    for _ in range(100):
+        rng2.choice(_FIRST_NAMES)
+        rng2.choice(_LAST_NAMES)
+        rng2.choice(_CITIES)
+        rng2.choice([2022, 2023, 2024])
+        rng2.randint(1, 12)
+        rng2.randint(1, 28)
+    statuses2 = ["completed", "completed", "completed", "completed", "shipped", "pending", "cancelled"]
+    oid2 = 0
+    iid2 = 0
+    for _ in range(500):
+        oid2 += 1
+        rng2.randint(1, 100)
+        year2 = rng2.choice([2023, 2024, 2024, 2024, 2025, 2025])
+        month2 = rng2.randint(1, 12)
+        day2 = rng2.randint(1, 28)
+        odate2 = f"{year2}-{month2:02d}-{day2:02d}"
+        rng2.choice(statuses2)
+        num_items2 = rng2.randint(1, 5)
+        used2: set[int] = set()
+        for _ in range(num_items2):
+            pid2 = rng2.randint(1, len(_PRODUCT_CATALOG))
+            if pid2 in used2:
+                continue
+            used2.add(pid2)
+            qty2 = rng2.randint(1, 3)
+            up2 = _PRODUCT_CATALOG[pid2 - 1][3]
+            disc2 = rng2.choice([0.0, 0.0, 0.0, 0.05, 0.10, 0.15])
+            iid2 += 1
+            _order_items_info2.append((oid2, pid2, qty2, up2, disc2, odate2))
+
+    _return_reasons2 = ["defective", "wrong_item", "not_as_described", "changed_mind", "too_expensive"]
+    rng3 = random.Random(42)
+    returns_data: list[list[Any]] = []
+    for ret_id in range(1, 51):
+        item = rng3.choice(_order_items_info2)
+        ret_order_id, ret_prod_id, ret_qty, ret_up, ret_disc, ret_odate = item
+        line_total = ret_qty * ret_up * (1 - ret_disc)
+        refund_pct = rng3.uniform(0.80, 1.00)
+        refund_amt = round(line_total * refund_pct, 2)
+        reason = rng3.choice(_return_reasons2)
+        days_after = rng3.randint(1, 30)
+        ret_date = (
+            datetime.date.fromisoformat(ret_odate) + datetime.timedelta(days=days_after)
+        ).isoformat()
+        returns_data.append([ret_id, ret_order_id, ret_prod_id, reason, refund_amt, ret_date])
+
     return {
         "customers": customers,
         "products": products,
         "orders": orders,
         "order_items": order_items,
+        "categories": categories_data,
+        "returns": returns_data,
     }
 
 
@@ -619,6 +779,185 @@ _RAW_QUESTIONS: list[dict[str, Any]] = [
         ),
         "order_matters": True,
     },
+
+    # ── Hard (8 new, using categories + returns tables) ───────────────────
+    {
+        "id": 26, "difficulty": "hard",
+        "question": (
+            "Calculate net revenue (total revenue minus refunds) per product category. "
+            "Show category name, gross revenue, total refunds, and net revenue. "
+            "Order by net revenue descending."
+        ),
+        "reference_sql": (
+            "SELECT p.category, "
+            "ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount)), 2) AS gross_revenue, "
+            "ROUND(COALESCE(SUM(r.refund_amount), 0), 2) AS total_refunds, "
+            "ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount)) "
+            "- COALESCE(SUM(r.refund_amount), 0), 2) AS net_revenue "
+            "FROM order_items oi "
+            "JOIN products p ON oi.product_id = p.id "
+            "LEFT JOIN returns r ON oi.order_id = r.order_id AND oi.product_id = r.product_id "
+            "GROUP BY p.category "
+            "ORDER BY net_revenue DESC;"
+        ),
+        "order_matters": True,
+    },
+    {
+        "id": 27, "difficulty": "hard",
+        "question": (
+            "Compare revenue between 2024 and 2025 by product category. "
+            "Show category, revenue_2024, revenue_2025, and growth_pct (percentage change, rounded to 1 decimal). "
+            "Order by growth_pct descending."
+        ),
+        "reference_sql": (
+            "SELECT p.category, "
+            "ROUND(SUM(CASE WHEN o.order_date LIKE '2024%' "
+            "THEN oi.quantity * oi.unit_price * (1 - oi.discount) ELSE 0 END), 2) AS revenue_2024, "
+            "ROUND(SUM(CASE WHEN o.order_date LIKE '2025%' "
+            "THEN oi.quantity * oi.unit_price * (1 - oi.discount) ELSE 0 END), 2) AS revenue_2025, "
+            "ROUND((SUM(CASE WHEN o.order_date LIKE '2025%' "
+            "THEN oi.quantity * oi.unit_price * (1 - oi.discount) ELSE 0 END) "
+            "- SUM(CASE WHEN o.order_date LIKE '2024%' "
+            "THEN oi.quantity * oi.unit_price * (1 - oi.discount) ELSE 0 END)) "
+            "/ NULLIF(SUM(CASE WHEN o.order_date LIKE '2024%' "
+            "THEN oi.quantity * oi.unit_price * (1 - oi.discount) ELSE 0 END), 0) * 100, 1) AS growth_pct "
+            "FROM order_items oi "
+            "JOIN products p ON oi.product_id = p.id "
+            "JOIN orders o ON oi.order_id = o.id "
+            "GROUP BY p.category "
+            "ORDER BY growth_pct DESC;"
+        ),
+        "order_matters": True,
+    },
+    {
+        "id": 28, "difficulty": "hard",
+        "question": (
+            "For each product, calculate its revenue as a percentage of its category's total revenue. "
+            "Show product name, category, product revenue, category total, and pct_of_category. "
+            "Only include products with revenue > $500. "
+            "Order by pct_of_category descending."
+        ),
+        "reference_sql": (
+            "WITH product_rev AS ("
+            "  SELECT p.id, p.name, p.category, "
+            "  ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount)), 2) AS product_revenue "
+            "  FROM order_items oi JOIN products p ON oi.product_id = p.id "
+            "  GROUP BY p.id, p.name, p.category"
+            "), "
+            "cat_rev AS ("
+            "  SELECT category, SUM(product_revenue) AS cat_total FROM product_rev GROUP BY category"
+            ") "
+            "SELECT pr.name, pr.category, pr.product_revenue, "
+            "ROUND(cr.cat_total, 2) AS category_total, "
+            "ROUND(pr.product_revenue / cr.cat_total * 100, 2) AS pct_of_category "
+            "FROM product_rev pr JOIN cat_rev cr ON pr.category = cr.category "
+            "WHERE pr.product_revenue > 500 "
+            "ORDER BY pct_of_category DESC;"
+        ),
+        "order_matters": True,
+    },
+    {
+        "id": 29, "difficulty": "hard",
+        "question": (
+            "Analyze customer cohorts by signup month. "
+            "For each cohort (YYYY-MM of created_at), show cohort month, number of customers, "
+            "total revenue, and average revenue per customer. "
+            "Order by cohort month."
+        ),
+        "reference_sql": (
+            "SELECT SUBSTR(c.created_at, 1, 7) AS cohort_month, "
+            "COUNT(DISTINCT c.id) AS num_customers, "
+            "ROUND(SUM(o.total_amount), 2) AS total_revenue, "
+            "ROUND(SUM(o.total_amount) / COUNT(DISTINCT c.id), 2) AS avg_revenue_per_customer "
+            "FROM customers c "
+            "JOIN orders o ON c.id = o.customer_id "
+            "GROUP BY SUBSTR(c.created_at, 1, 7) "
+            "ORDER BY cohort_month;"
+        ),
+        "order_matters": True,
+    },
+    {
+        "id": 30, "difficulty": "hard",
+        "question": (
+            "Calculate a 3-month moving average of monthly order totals. "
+            "Show month (YYYY-MM), monthly total, and the moving average "
+            "(current + previous 2 months, rounded to 2 decimals). "
+            "Order by month."
+        ),
+        "reference_sql": (
+            "WITH monthly AS ("
+            "  SELECT SUBSTR(order_date, 1, 7) AS month, "
+            "  ROUND(SUM(total_amount), 2) AS monthly_total "
+            "  FROM orders GROUP BY SUBSTR(order_date, 1, 7)"
+            ") "
+            "SELECT month, monthly_total, "
+            "ROUND(AVG(monthly_total) OVER ("
+            "  ORDER BY month ROWS BETWEEN 2 PRECEDING AND CURRENT ROW"
+            "), 2) AS moving_avg "
+            "FROM monthly ORDER BY month;"
+        ),
+        "order_matters": True,
+    },
+    {
+        "id": 31, "difficulty": "hard",
+        "question": (
+            "Find all products priced above the average price in their category. "
+            "Show product name, category, price, and category average price (rounded to 2 decimals). "
+            "Order by category, then by price descending."
+        ),
+        "reference_sql": (
+            "SELECT p.name, p.category, p.price, "
+            "ROUND(AVG(p.price) OVER (PARTITION BY p.category), 2) AS avg_category_price "
+            "FROM products p "
+            "WHERE p.price > (SELECT AVG(p2.price) FROM products p2 WHERE p2.category = p.category) "
+            "ORDER BY p.category, p.price DESC;"
+        ),
+        "order_matters": True,
+    },
+    {
+        "id": 32, "difficulty": "hard",
+        "question": (
+            "Find the top 3 customers by total spending in each state. "
+            "Show state, customer name, total spent (rounded to 2 decimals), "
+            "and their rank within the state. "
+            "Order by state, then rank."
+        ),
+        "reference_sql": (
+            "WITH customer_spend AS ("
+            "  SELECT c.state, c.name, ROUND(SUM(o.total_amount), 2) AS total_spent "
+            "  FROM customers c JOIN orders o ON c.id = o.customer_id "
+            "  GROUP BY c.id, c.state, c.name"
+            "), "
+            "ranked AS ("
+            "  SELECT state, name, total_spent, "
+            "  RANK() OVER (PARTITION BY state ORDER BY total_spent DESC) AS rnk "
+            "  FROM customer_spend"
+            ") "
+            "SELECT state, name, total_spent, rnk "
+            "FROM ranked WHERE rnk <= 3 "
+            "ORDER BY state, rnk;"
+        ),
+        "order_matters": True,
+    },
+    {
+        "id": 33, "difficulty": "hard",
+        "question": (
+            "Find categories that have a parent category (i.e., subcategories), "
+            "and show the parent category name alongside the subcategory name "
+            "and the total number of products in each subcategory. "
+            "Order by parent category, then by product count descending."
+        ),
+        "reference_sql": (
+            "SELECT parent.name AS parent_category, child.name AS subcategory, "
+            "COUNT(p.id) AS product_count "
+            "FROM categories child "
+            "JOIN categories parent ON child.parent_id = parent.id "
+            "LEFT JOIN products p ON p.category = parent.name "
+            "GROUP BY parent.id, parent.name, child.id, child.name "
+            "ORDER BY parent_category, product_count DESC;"
+        ),
+        "order_matters": True,
+    },
 ]
 
 
@@ -925,7 +1264,7 @@ def run_sql_question(
             )
 
         try:
-            response, tps, ttft, total_ms = call_openai_api(
+            response, tps, ttft, total_ms, _, _ = call_openai_api(
                 base_url, model, prompt, api_key=api_key,
                 max_tokens=1024, temperature=0.3,
                 system_prompt=_SYSTEM_PROMPT,

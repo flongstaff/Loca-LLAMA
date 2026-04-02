@@ -372,11 +372,11 @@ def benchmark_openai_api(
                     u = obj["usage"]
                     prompt_tokens = u.get("prompt_tokens", prompt_tokens)
                     completion_tokens = u.get("completion_tokens", completion_tokens)
-                # Content delta → token
+                # Content delta → token (also count reasoning_content for thinking models)
                 choices = obj.get("choices", [])
                 if choices:
                     delta = choices[0].get("delta", {})
-                    content = delta.get("content")
+                    content = delta.get("content") or delta.get("reasoning_content")
                     if content:
                         elapsed = (time.perf_counter() - start) * 1000
                         token_count += 1
@@ -502,7 +502,7 @@ def benchmark_openai_api_streaming(
                 try:
                     obj = json.loads(data_str)
                     delta = obj["choices"][0].get("delta", {})
-                    content = delta.get("content")
+                    content = delta.get("content") or delta.get("reasoning_content")
                     if content:
                         elapsed = (time.perf_counter() - start) * 1000
                         yield (content, elapsed)

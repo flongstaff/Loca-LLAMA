@@ -188,7 +188,7 @@ def run_gsm8k(
         )
 
         try:
-            response, _, _, total_ms = call_openai_api(
+            response, _, _, total_ms, _, _ = call_openai_api(
                 base_url, model_id, prompt, api_key=api_key,
                 max_tokens=512, temperature=0.1,
                 system_prompt="You are a math tutor. Solve problems step by step. Always end with #### followed by the numeric answer.",
@@ -266,7 +266,7 @@ def run_arc_challenge(
         )
 
         try:
-            response, _, _, _ = call_openai_api(
+            response, _, _, _, _, _ = call_openai_api(
                 base_url, model_id, prompt, api_key=api_key,
                 max_tokens=16, temperature=0.1,
                 system_prompt="Answer multiple choice questions with just the letter.",
@@ -386,7 +386,7 @@ def run_hellaswag(
         )
 
         try:
-            response, _, _, _ = call_openai_api(
+            response, _, _, _, _, _ = call_openai_api(
                 base_url, model_id, prompt, api_key=api_key,
                 max_tokens=16, temperature=0.1,
                 system_prompt="Choose the most plausible completion. Answer with just the letter.",
@@ -625,7 +625,7 @@ def run_ifeval(
             continue
 
         try:
-            response, _, _, _ = call_openai_api(
+            response, _, _, _, _, _ = call_openai_api(
                 base_url, model_id, prompt_text, api_key=api_key,
                 max_tokens=1024, temperature=0.1,
                 system_prompt="Follow instructions precisely.",
@@ -698,7 +698,7 @@ def run_humaneval(
         )
 
         try:
-            response, _, _, _ = call_openai_api(
+            response, _, _, _, _, _ = call_openai_api(
                 base_url, model_id, prompt, api_key=api_key,
                 max_tokens=1024, temperature=0.1,
                 system_prompt="You are a Python expert. Complete the function. Output only code, no explanation.",
@@ -821,7 +821,7 @@ def run_mmlu(
             )
 
             try:
-                response, _, _, _ = call_openai_api(
+                response, _, _, _, _, _ = call_openai_api(
                     base_url, model_id, prompt, api_key=api_key,
                     max_tokens=16, temperature=0.1,
                     system_prompt="Answer multiple choice questions with just the letter.",
