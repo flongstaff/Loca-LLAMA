@@ -44,6 +44,10 @@ class ThroughputResult:
     max_latency_ms: float
     avg_ttft_ms: float
     error_rate: float
+    # Latency percentiles
+    p50_latency_ms: float = 0.0
+    p90_latency_ms: float = 0.0
+    p99_latency_ms: float = 0.0
     per_request: list[RequestResult] = field(default_factory=list)
 
 
@@ -177,6 +181,14 @@ def run_throughput_test(
     throughput = total_tokens / overall_elapsed if overall_elapsed > 0 else 0.0
 
     latencies = [r.elapsed_ms for r in successful] if successful else [0.0]
+    sorted_latencies = sorted(latencies)
+
+    def _pct(vals: list[float], p: float) -> float:
+        if not vals:
+            return 0.0
+        idx = (p / 100) * (len(vals) - 1)
+        lo, hi = int(idx), min(int(idx) + 1, len(vals) - 1)
+        return vals[lo] + (idx - lo) * (vals[hi] - vals[lo])
 
     return ThroughputResult(
         concurrency=concurrency,
@@ -191,5 +203,45 @@ def run_throughput_test(
         max_latency_ms=max(latencies),
         avg_ttft_ms=0.0,  # non-streaming doesn't measure TTFT
         error_rate=len(failed) / total_requests if total_requests > 0 else 0.0,
+        p50_latency_ms=_pct(sorted_latencies, 50),
+        p90_latency_ms=_pct(sorted_latencies, 90),
+        p99_latency_ms=_pct(sorted_latencies, 99),
         per_request=results,
     )
+
+
+def run_throughput_ramp(
+    base_url: str,
+    model_id: str,
+    concurrency_levels: list[int] | None = None,
+    requests_per_level: int = 4,
+    prompt: str = "Explain the concept of recursion in programming. Be concise.",
+    max_tokens: int = 100,
+    api_key: str | None = None,
+    progress_callback: Any = None,
+) -> list[ThroughputResult]:
+    """Run throughput tests at increasing concurrency to find saturation point.
+
+    Returns one ThroughputResult per concurrency level.
+    """
+    levels = concurrency_levels or [1, 2, 4, 8]
+    results: list[ThroughputResult] = []
+
+    for level in levels:
+        print(f"  Concurrency {level}...", end=" ", flush=True)
+        result = run_throughput_test(
+            base_url=base_url,
+            model_id=model_id,
+            concurrency=level,
+            total_requests=max(requests_per_level, level),
+            prompt=prompt,
+            max_tokens=max_tokens,
+            api_key=api_key,
+            progress_callback=progress_callback,
+        )
+        results.append(result)
+        print(f"{result.throughput_tps:.1f} tok/s, "
+              f"p50={result.p50_latency_ms:.0f}ms, "
+              f"p90={result.p90_latency_ms:.0f}ms")
+
+    return results

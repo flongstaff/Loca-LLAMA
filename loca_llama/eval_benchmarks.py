@@ -114,24 +114,32 @@ def _gsm8k_extract_answer(text: str) -> str | None:
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
     # Look for #### pattern first (gold format)
-    m = re.search(r"####\s*([\d,.-]+)", text)
+    m = re.search(r"####\s*\$?([\d,.-]+)", text)
     if m:
-        return m.group(1).replace(",", "")
+        return m.group(1).replace(",", "").replace("$", "")
 
     # Look for boxed answer (common model format)
     m = re.search(r"\\boxed\{([^}]+)\}", text)
     if m:
-        return m.group(1).replace(",", "")
+        return m.group(1).replace(",", "").replace("$", "")
 
-    # Look for "the answer is X" or "= X" patterns
-    m = re.search(r"(?:answer|total|result)\s*(?:is|=|:)\s*\$?([\d,.-]+)", text, re.IGNORECASE)
+    # "the answer is (approximately) X" or "= X" or "therefore, X"
+    m = re.search(
+        r"(?:answer|total|result|therefore)\s*(?:is|=|:)\s*(?:approximately\s*)?\$?([\d,.-]+)",
+        text, re.IGNORECASE,
+    )
     if m:
-        return m.group(1).replace(",", "")
+        return m.group(1).replace(",", "").replace("$", "")
 
-    # Last number in the response
-    numbers = re.findall(r"(?<![a-zA-Z])([\d,]+\.?\d*)(?![a-zA-Z])", text)
+    # "equals X" or "comes to X"
+    m = re.search(r"(?:equals|comes to|amounts to)\s*\$?([\d,.-]+)", text, re.IGNORECASE)
+    if m:
+        return m.group(1).replace(",", "").replace("$", "")
+
+    # Last number in the response (strip dollar signs)
+    numbers = re.findall(r"(?<![a-zA-Z])\$?([\d,]+\.?\d*)(?![a-zA-Z])", text)
     if numbers:
-        return numbers[-1].replace(",", "")
+        return numbers[-1].replace(",", "").replace("$", "")
 
     return None
 
@@ -151,6 +159,8 @@ def run_gsm8k(
 
     correct = 0
     total = 0
+    sample_timings: list[float] = []
+    confidence_scores: list[float] = []
 
     for i, row in enumerate(data):
         question = row.get("question", "")
@@ -168,13 +178,15 @@ def run_gsm8k(
         )
 
         try:
-            response, _, _, _ = call_openai_api(
+            response, _, _, total_ms = call_openai_api(
                 base_url, model_id, prompt, api_key=api_key,
                 max_tokens=512, temperature=0.1,
                 system_prompt="You are a math tutor. Solve problems step by step. Always end with #### followed by the numeric answer.",
             )
             model_answer = _gsm8k_extract_answer(response)
             total += 1
+            sample_timings.append(total_ms)
+            confidence_scores.append(_estimate_confidence(response))
 
             if model_answer and _numbers_match(model_answer, gold_num):
                 correct += 1
@@ -188,8 +200,14 @@ def run_gsm8k(
                 print(f"    GSM8K: {i+1}/{len(data)} (error: {e})", flush=True)
 
     score = correct / total if total > 0 else 0
+    avg_time = sum(sample_timings) / len(sample_timings) if sample_timings else 0
+    avg_confidence = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0
     print(f"  GSM8K: {correct}/{total} = {score:.1%}")
-    return {"score": score, "correct": correct, "total": total}
+    return {
+        "score": score, "correct": correct, "total": total,
+        "avg_sample_time_ms": avg_time,
+        "avg_confidence": avg_confidence,
+    }
 
 
 def _numbers_match(a: str, b: str) -> bool:
@@ -261,23 +279,54 @@ def run_arc_challenge(
 
 def _extract_mc_answer(response: str, valid_labels: list[str]) -> str | None:
     """Extract a multiple choice letter from model response."""
-    text = response.strip()
+    # Strip thinking tags first
+    text = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL).strip()
+    upper_labels = [l.upper() for l in valid_labels]
+
     # Direct single letter
-    if len(text) == 1 and text.upper() in [l.upper() for l in valid_labels]:
+    if len(text) == 1 and text.upper() in upper_labels:
         return text.upper()
+
     # Letter followed by ) or .
     m = re.match(r"^([A-E])[).\s]", text, re.IGNORECASE)
-    if m:
+    if m and m.group(1).upper() in upper_labels:
         return m.group(1).upper()
-    # "The answer is X"
-    m = re.search(r"(?:answer|correct)\s*(?:is|:)\s*([A-E])", text, re.IGNORECASE)
-    if m:
+
+    # Try JSON format: {"answer": "A"}
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            ans = parsed.get("answer", parsed.get("Answer", ""))
+            if ans and ans.upper() in upper_labels:
+                return ans.upper()
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # "The answer is (A)" or "correct answer is (B)"
+    m = re.search(r"(?:answer|correct)\s*(?:is|:)\s*\(?([A-E])\)?", text, re.IGNORECASE)
+    if m and m.group(1).upper() in upper_labels:
         return m.group(1).upper()
+
+    # "A is correct" or "A is the correct answer"
+    m = re.search(r"([A-E])\s+is\s+(?:the\s+)?(?:correct|right|best)", text, re.IGNORECASE)
+    if m and m.group(1).upper() in upper_labels:
+        return m.group(1).upper()
+
     # First letter that matches
     for ch in text:
-        if ch.upper() in [l.upper() for l in valid_labels]:
+        if ch.upper() in upper_labels:
             return ch.upper()
+
     return None
+
+
+def _estimate_confidence(response: str) -> float:
+    """Estimate model confidence based on hedging language (0.0-1.0)."""
+    text = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL).lower()
+    hedges = ["i think", "probably", "maybe", "not sure", "i believe",
+              "might be", "possibly", "i guess", "it seems", "uncertain"]
+    hedge_count = sum(1 for h in hedges if h in text)
+    return max(0.0, 1.0 - hedge_count * 0.2)
 
 
 # =============================================================================

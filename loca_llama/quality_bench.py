@@ -166,6 +166,75 @@ TASKS: list[dict[str, Any]] = [
             "runnable": False,
         },
     },
+    {
+        "name": "list_comprehension",
+        "category": "coding",
+        "prompt": "Write a Python function `transform_data(items: list[dict]) -> list[str]` that takes a list of dicts with 'name' (str) and 'score' (int) keys, and returns a list of formatted strings like 'Name: score' for items where score > 50, sorted by score descending. Use a list comprehension. Include type hints.",
+        "validation": {
+            "must_contain": ["def transform_data", "-> list[str]"],
+            "must_not_contain": [],
+            "runnable": True,
+            "test_code": textwrap.dedent("""\
+                data = [{"name": "Alice", "score": 80}, {"name": "Bob", "score": 30}, {"name": "Charlie", "score": 95}]
+                result = transform_data(data)
+                assert len(result) == 2, f"Expected 2 items, got {len(result)}"
+                assert result[0] == "Charlie: 95", f"Expected 'Charlie: 95', got {result[0]!r}"
+                assert result[1] == "Alice: 80", f"Expected 'Alice: 80', got {result[1]!r}"
+                print("PASS: list_comprehension")
+            """),
+        },
+    },
+    {
+        "name": "async_function",
+        "category": "coding",
+        "prompt": "Write an async Python function `fetch_all(urls: list[str]) -> list[dict[str, Any]]` that simulates fetching data. For each URL, return {'url': url, 'status': 200, 'length': len(url)} after a brief delay. Use asyncio.gather for concurrency. Handle exceptions per-URL returning {'url': url, 'status': 0, 'error': str}. Include type hints.",
+        "validation": {
+            "must_contain": ["async def fetch_all", "asyncio.gather", "await"],
+            "must_not_contain": [],
+            "runnable": True,
+            "test_code": textwrap.dedent("""\
+                import asyncio
+                urls = ["http://example.com", "http://test.org"]
+                results = asyncio.run(fetch_all(urls))
+                assert len(results) == 2, f"Expected 2 results, got {len(results)}"
+                assert results[0]["status"] == 200, f"Expected status 200, got {results[0]['status']}"
+                assert results[1]["status"] == 200, f"Expected status 200, got {results[1]['status']}"
+                assert results[0]["length"] == len("http://example.com"), f"Unexpected length for first URL"
+                assert results[1]["length"] == len("http://test.org"), f"Unexpected length for second URL"
+                print("PASS: async_function")
+            """),
+        },
+    },
+    {
+        "name": "regex_extraction",
+        "category": "coding",
+        "prompt": "Write a Python function `extract_emails(text: str) -> list[str]` that finds all valid email addresses in a text string using regex. Return them as a sorted list of lowercase strings. Include type hints.",
+        "validation": {
+            "must_contain": ["def extract_emails", "-> list[str]", "re."],
+            "must_not_contain": [],
+            "runnable": True,
+            "test_code": textwrap.dedent("""\
+                text = "Contact alice@example.com or BOB@TEST.ORG for info. Invalid: @broken, no@"
+                result = extract_emails(text)
+                assert len(result) == 2, f"Expected 2 emails, got {len(result)}: {result}"
+                assert result == ["alice@example.com", "bob@test.org"], f"Expected sorted lowercase emails, got {result}"
+                print("PASS: regex_extraction")
+            """),
+        },
+    },
+    {
+        "name": "api_design",
+        "category": "reasoning",
+        "prompt": "Design a REST API endpoint response schema for a paginated list of products. The response should include: items (list of product objects with id, name, price, category), pagination metadata (page, per_page, total_items, total_pages), and a links object with next/prev/self URLs. Write the response as a Python TypedDict or dataclass definition.",
+        "validation": {
+            "must_contain": ["total_pages", "next"],
+            "must_contain_any": [
+                ["TypedDict", "dataclass", "BaseModel"],
+            ],
+            "must_not_contain": [],
+            "runnable": False,
+        },
+    },
 ]
 
 
@@ -177,6 +246,7 @@ class TaskResult:
     response: str = ""
     contains_score: float = 0.0
     runnable_score: float = 0.0
+    composite_score: float = 0.0
     speed_tps: float = 0.0
     ttft_ms: float = 0.0
     total_ms: float = 0.0
@@ -369,6 +439,12 @@ def run_quality_benchmark(
                 )
                 contains_score, runnable_score, error = score_task(task, response)
 
+                is_runnable = task["validation"].get("runnable", False)
+                if is_runnable:
+                    composite_score = runnable_score * 0.7 + contains_score * 0.3
+                else:
+                    composite_score = contains_score
+
                 r = TaskResult(
                     task_name=task["name"],
                     model=model,
@@ -376,6 +452,7 @@ def run_quality_benchmark(
                     response=response,
                     contains_score=contains_score,
                     runnable_score=runnable_score,
+                    composite_score=composite_score,
                     speed_tps=tps,
                     ttft_ms=ttft,
                     total_ms=total_ms,

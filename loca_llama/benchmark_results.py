@@ -1,12 +1,13 @@
 """Unified benchmark results storage.
 
-All benchmark results (speed, quality, monitor) are saved to ~/.loca-llama/results/
-as individual JSON files per run.
+All benchmark results (speed, quality, monitor, eval, sql, throughput) are saved
+to ~/.loca-llama/results/ as individual JSON files per run.
 """
 
 from __future__ import annotations
 
 import json
+import platform
 import tempfile
 import time
 from dataclasses import dataclass, field, asdict
@@ -17,11 +18,47 @@ from typing import Any
 RESULTS_DIR = Path.home() / ".loca-llama" / "results"
 
 
+def detect_hardware_string() -> str:
+    """Auto-detect hardware as a human-readable string, e.g. 'M4 Pro 48GB'.
+
+    Falls back to platform.machine() on non-Mac systems.
+    """
+    try:
+        from .hardware import detect_mac
+        result = detect_mac()
+        if result:
+            _key, spec = result
+            return f"{spec.chip} {spec.memory_gb}GB"
+    except Exception:
+        pass
+
+    # Fallback: try to read chip + memory directly via sysctl on macOS
+    if platform.system() == "Darwin":
+        try:
+            import subprocess
+            brand = subprocess.check_output(
+                ["sysctl", "-n", "machdep.cpu.brand_string"],
+                text=True, timeout=2,
+            ).strip()
+            mem_bytes = subprocess.check_output(
+                ["sysctl", "-n", "hw.memsize"],
+                text=True, timeout=2,
+            ).strip()
+            if brand.startswith("Apple "):
+                chip = brand.removeprefix("Apple ")
+                mem_gb = round(int(mem_bytes) / (1024 ** 3))
+                return f"{chip} {mem_gb}GB"
+        except Exception:
+            pass
+
+    return platform.machine()
+
+
 @dataclass
 class BenchmarkRecord:
     """A single benchmark result record."""
 
-    type: str  # "speed", "quality", "monitor"
+    type: str  # "speed", "quality", "monitor", "eval", "sql", "throughput"
     model: str
     runtime: str  # "lm-studio", "omlx", "llama.cpp-server", "openrouter", etc.
     timestamp: float = field(default_factory=time.time)
@@ -36,13 +73,21 @@ class BenchmarkRecord:
     prompt_tokens: int = 0
     generated_tokens: int = 0
 
-    # Quality metrics (quality type)
+    # Quality metrics (quality / eval / sql types)
     quality_scores: dict[str, Any] = field(default_factory=dict)
     # e.g. {"pass_rate": 0.75, "avg_contains": 0.9, "tasks": [...]}
 
     # Monitor metrics (monitor type)
     monitor_stats: dict[str, Any] = field(default_factory=dict)
     # e.g. {"total_requests": 12, "total_tokens": 4832, "session_duration_s": 300}
+
+    # Throughput metrics (throughput type)
+    throughput_stats: dict[str, Any] = field(default_factory=dict)
+    # e.g. {"concurrency": 4, "throughput_tps": 120, "p50_latency_ms": 200, ...}
+
+    # Speed percentile metrics
+    speed_percentiles: dict[str, float] = field(default_factory=dict)
+    # e.g. {"p50_tok_per_sec": 25, "p90_tok_per_sec": 28, "p50_ttft_ms": 120, ...}
 
     # Cloud comparison (quality --compare)
     cloud_provider: str = ""  # "pi", "claude", ""

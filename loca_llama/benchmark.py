@@ -340,6 +340,7 @@ def benchmark_openai_api(
     prompt_tokens = 0
     completion_tokens = 0
     timings: dict = {}
+    token_timestamps: list[float] = []  # elapsed ms for each token
 
     try:
         req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
@@ -372,6 +373,7 @@ def benchmark_openai_api(
                     if content:
                         elapsed = (time.perf_counter() - start) * 1000
                         token_count += 1
+                        token_timestamps.append(elapsed)
                         if token_count == 1:
                             ttft_ms = elapsed
                             first_token_time = elapsed
@@ -419,6 +421,18 @@ def benchmark_openai_api(
     if not success:
         error = "No tokens generated (model may have crashed or rejected request)"
 
+    # Compute per-token latencies (inter-token intervals)
+    per_token_latencies: list[float] = []
+    if len(token_timestamps) > 1:
+        per_token_latencies = [
+            token_timestamps[i] - token_timestamps[i - 1]
+            for i in range(1, len(token_timestamps))
+        ]
+
+    extra_data = dict(timings)
+    if per_token_latencies:
+        extra_data["per_token_latencies"] = per_token_latencies
+
     return BenchmarkResult(
         model_name=model_id,
         runtime=runtime_name,
@@ -433,7 +447,7 @@ def benchmark_openai_api(
         success=success,
         run_number=run_number,
         error=error,
-        extra=timings,
+        extra=extra_data,
         preset_name=preset_name,
         preset_config=preset_config,
     )
@@ -765,15 +779,38 @@ def benchmark_with_server(
                 proc.wait(timeout=5)
 
 
+def _percentile(values: list[float], p: float) -> float:
+    """Compute the p-th percentile (0-100) of a sorted list."""
+    if not values:
+        return 0.0
+    s = sorted(values)
+    idx = (p / 100) * (len(s) - 1)
+    lo = int(idx)
+    hi = min(lo + 1, len(s) - 1)
+    frac = idx - lo
+    return s[lo] + frac * (s[hi] - s[lo])
+
+
 def aggregate_results(results: list[BenchmarkResult], skip_first: bool = True) -> dict:
     """Aggregate multiple benchmark runs, optionally skipping warmup.
 
-    Includes median, p95, and standard deviation for generation speed.
+    Includes percentiles (p50/p90/p95/p99) for tok/s and TTFT,
+    per-token latency distribution, and auto-warmup detection.
     """
     import statistics
 
     successful = [r for r in results if r.success]
-    if skip_first and len(successful) > 1:
+
+    # Auto-warmup detection
+    warmup_excluded = False
+    if skip_first and len(successful) > 2:
+        first_speed = successful[0].tokens_per_second
+        rest_speeds = [r.tokens_per_second for r in successful[1:]]
+        rest_mean = sum(rest_speeds) / len(rest_speeds) if rest_speeds else 0
+        if rest_mean > 0 and first_speed < rest_mean * 0.8:
+            warmup_excluded = True
+        successful = successful[1:]
+    elif skip_first and len(successful) > 1:
         successful = successful[1:]
 
     if not successful:
@@ -783,21 +820,40 @@ def aggregate_results(results: list[BenchmarkResult], skip_first: bool = True) -
     prefill_speeds = [r.prompt_tokens_per_second for r in successful]
     ttfts = [r.time_to_first_token_ms for r in successful]
 
-    tok_speeds_sorted = sorted(tok_speeds)
-    p95_idx = int(len(tok_speeds_sorted) * 0.95)
-    p95_idx = min(p95_idx, len(tok_speeds_sorted) - 1)
+    # Collect all per-token latencies across runs
+    all_per_token: list[float] = []
+    for r in successful:
+        latencies = r.extra.get("per_token_latencies", [])
+        if isinstance(latencies, list):
+            all_per_token.extend(latencies)
 
     return {
         "success": True,
         "runs": len(successful),
+        "warmup_excluded": warmup_excluded,
+        # tok/s stats
         "avg_tok_per_sec": sum(tok_speeds) / len(tok_speeds),
         "min_tok_per_sec": min(tok_speeds),
         "max_tok_per_sec": max(tok_speeds),
         "median_tok_per_sec": statistics.median(tok_speeds),
-        "p95_tok_per_sec": tok_speeds_sorted[p95_idx],
         "stddev_tok_per_sec": statistics.stdev(tok_speeds) if len(tok_speeds) >= 2 else 0.0,
-        "avg_prefill_tok_per_sec": sum(prefill_speeds) / len(prefill_speeds),
+        # tok/s percentiles
+        "p50_tok_per_sec": _percentile(tok_speeds, 50),
+        "p90_tok_per_sec": _percentile(tok_speeds, 90),
+        "p95_tok_per_sec": _percentile(tok_speeds, 95),
+        "p99_tok_per_sec": _percentile(tok_speeds, 99),
+        # TTFT percentiles
         "avg_ttft_ms": sum(ttfts) / len(ttfts),
+        "p50_ttft_ms": _percentile(ttfts, 50),
+        "p90_ttft_ms": _percentile(ttfts, 90),
+        "p95_ttft_ms": _percentile(ttfts, 95),
+        "p99_ttft_ms": _percentile(ttfts, 99),
+        # Prefill + totals
+        "avg_prefill_tok_per_sec": sum(prefill_speeds) / len(prefill_speeds),
         "avg_total_ms": sum(r.total_time_ms for r in successful) / len(successful),
         "total_tokens_generated": sum(r.generated_tokens for r in successful),
+        # Per-token latency distribution
+        "per_token_latency_p50_ms": _percentile(all_per_token, 50) if all_per_token else 0.0,
+        "per_token_latency_p90_ms": _percentile(all_per_token, 90) if all_per_token else 0.0,
+        "per_token_latency_p99_ms": _percentile(all_per_token, 99) if all_per_token else 0.0,
     }
