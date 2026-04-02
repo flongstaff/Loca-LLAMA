@@ -462,6 +462,91 @@ _RAW_QUESTIONS: list[dict[str, Any]] = [
         ),
         "order_matters": True,
     },
+
+    # ── Additional Medium / Hard (5) ──────────────────────────────────────
+    {
+        "id": 21, "difficulty": "medium",
+        "question": (
+            "Combine a list of all product names from the 'Electronics' category and all product names "
+            "from the 'Books' category into a single list. Show product name and category, ordered by name."
+        ),
+        "reference_sql": (
+            "SELECT name, category FROM products WHERE category IN ('Electronics', 'Books') ORDER BY name;"
+        ),
+        "order_matters": True,
+    },
+    {
+        "id": 22, "difficulty": "hard",
+        "question": (
+            "Find customers who have ordered products from at least 3 different product categories. "
+            "Show customer name and the number of distinct categories they've ordered from, "
+            "ordered by category count descending."
+        ),
+        "reference_sql": (
+            "SELECT c.name, COUNT(DISTINCT p.category) AS category_count "
+            "FROM customers c "
+            "JOIN orders o ON c.id = o.customer_id "
+            "JOIN order_items oi ON o.id = oi.order_id "
+            "JOIN products p ON oi.product_id = p.id "
+            "GROUP BY c.id, c.name "
+            "HAVING COUNT(DISTINCT p.category) >= 3 "
+            "ORDER BY category_count DESC;"
+        ),
+        "order_matters": True,
+    },
+    {
+        "id": 23, "difficulty": "medium",
+        "question": (
+            "Categorize customers into spending tiers based on their total order amount: "
+            "'VIP' for total > $5000, 'Regular' for total $1000-$5000, 'New' for total < $1000. "
+            "Show customer name, total spent (rounded to 2 decimals), and tier. "
+            "Order by total spent descending."
+        ),
+        "reference_sql": (
+            "SELECT c.name, ROUND(SUM(o.total_amount), 2) AS total_spent, "
+            "CASE WHEN SUM(o.total_amount) > 5000 THEN 'VIP' "
+            "WHEN SUM(o.total_amount) >= 1000 THEN 'Regular' "
+            "ELSE 'New' END AS tier "
+            "FROM customers c JOIN orders o ON c.id = o.customer_id "
+            "GROUP BY c.id, c.name ORDER BY total_spent DESC;"
+        ),
+        "order_matters": True,
+    },
+    {
+        "id": 24, "difficulty": "medium",
+        "question": (
+            "Find pairs of customers from the same city who have both placed orders. "
+            "Show both customer names and the city. Each pair should appear only once "
+            "(no duplicates like A-B and B-A). Order by city, then first customer name."
+        ),
+        "reference_sql": (
+            "SELECT c1.name AS customer1, c2.name AS customer2, c1.city "
+            "FROM customers c1 "
+            "JOIN customers c2 ON c1.city = c2.city AND c1.id < c2.id "
+            "JOIN orders o1 ON c1.id = o1.customer_id "
+            "JOIN orders o2 ON c2.id = o2.customer_id "
+            "GROUP BY c1.id, c2.id, c1.name, c2.name, c1.city "
+            "ORDER BY c1.city, c1.name;"
+        ),
+        "order_matters": True,
+    },
+    {
+        "id": 25, "difficulty": "hard",
+        "question": (
+            "Calculate a running total of order amounts per customer, ordered by order date. "
+            "Show customer name, order date, order total, and the cumulative total (running sum) "
+            "for that customer. Only include customers with at least 3 orders. "
+            "Order by customer name, then order date."
+        ),
+        "reference_sql": (
+            "SELECT c.name, o.order_date, o.total_amount, "
+            "SUM(o.total_amount) OVER (PARTITION BY c.id ORDER BY o.order_date, o.id) AS running_total "
+            "FROM customers c JOIN orders o ON c.id = o.customer_id "
+            "WHERE c.id IN (SELECT customer_id FROM orders GROUP BY customer_id HAVING COUNT(*) >= 3) "
+            "ORDER BY c.name, o.order_date, o.id;"
+        ),
+        "order_matters": True,
+    },
 ]
 
 
@@ -540,7 +625,41 @@ def execute_sql_safe(
     return columns, rows
 
 
+# ── SQL Complexity Analysis ──────────────────────────────────────────────────
+
+def _analyze_sql_complexity(sql: str) -> dict[str, int]:
+    """Count SQL complexity indicators."""
+    upper = sql.upper()
+    return {
+        "joins": upper.count("JOIN"),
+        "subqueries": upper.count("SELECT") - 1,
+        "window_functions": len(re.findall(r"\bOVER\s*\(", upper)),
+        "case_when": upper.count("CASE"),
+        "ctes": upper.count("WITH"),
+        "group_by": 1 if "GROUP BY" in upper else 0,
+    }
+
+
 # ── Result Comparison ───────────────────────────────────────────────────────
+
+# Common column alias equivalences: map alias -> canonical name
+_COLUMN_ALIASES: dict[str, str] = {
+    "cnt": "count",
+    "num": "count",
+    "qty": "quantity",
+    "amt": "amount",
+    "pct": "percent",
+}
+
+
+def _normalize_col_name(col: str) -> str:
+    """Normalize a column name for loose comparison.
+
+    Strips underscores and lowercases, then applies common alias mappings.
+    """
+    normalized = col.lower().replace("_", "")
+    return _COLUMN_ALIASES.get(normalized, normalized)
+
 
 def _normalize_value(v: Any) -> Any:
     """Normalize a value for comparison."""
@@ -557,6 +676,32 @@ def _normalize_row(row: tuple) -> tuple:
     return tuple(_normalize_value(v) for v in row)
 
 
+def _values_close(a: Any, b: Any, rel_tol: float = 0.01) -> bool:
+    """Return True if two values are equivalent, using 1% relative tolerance for numerics."""
+    if a is None and b is None:
+        return True
+    if a is None or b is None:
+        return False
+    # Both numeric: use relative tolerance
+    try:
+        fa, fb = float(a), float(b)
+        if fa == fb:
+            return True
+        if fa == 0.0:
+            return abs(fb) <= rel_tol
+        return abs(fa - fb) / abs(fa) <= rel_tol
+    except (TypeError, ValueError):
+        pass
+    return a == b
+
+
+def _rows_close(exp_row: tuple, act_row: tuple) -> bool:
+    """Return True if all values in the row are within tolerance."""
+    if len(exp_row) != len(act_row):
+        return False
+    return all(_values_close(e, a) for e, a in zip(exp_row, act_row))
+
+
 def compare_results(
     expected_cols: list[str],
     expected_rows: list[tuple],
@@ -566,35 +711,45 @@ def compare_results(
 ) -> tuple[bool, str]:
     """Compare expected and actual SQL results.
 
+    Column name checking is relaxed: if column *count* matches, column names
+    are not required to match exactly (models often use different aliases).
+    Numeric value comparison uses 1% relative tolerance.
+
     Returns (match: bool, reason: str).
     """
-    # Normalize columns
-    exp_cols = [c.lower() for c in expected_cols]
-    act_cols = [c.lower() for c in actual_cols]
-
-    # Check column count matches
-    if len(exp_cols) != len(act_cols):
-        return False, f"Column count mismatch: expected {len(exp_cols)}, got {len(act_cols)}"
+    # Check column count matches (names are not required to be identical)
+    if len(expected_cols) != len(actual_cols):
+        return False, f"Column count mismatch: expected {len(expected_cols)}, got {len(actual_cols)}"
 
     # Check row count
     if len(expected_rows) != len(actual_rows):
         return False, f"Row count mismatch: expected {len(expected_rows)}, got {len(actual_rows)}"
 
-    # Normalize rows
+    # Normalize rows for string comparison (lowercased, stripped)
     exp_normalized = [_normalize_row(r) for r in expected_rows]
     act_normalized = [_normalize_row(r) for r in actual_rows]
 
-    # Try direct column-aligned comparison first
     if order_matters:
         for i, (exp_row, act_row) in enumerate(zip(exp_normalized, act_normalized)):
-            if exp_row != act_row:
+            if exp_row != act_row and not _rows_close(exp_row, act_row):
                 return False, f"Row {i} mismatch: expected {exp_row}, got {act_row}"
         return True, ""
     else:
-        # Sort both for unordered comparison
-        if sorted(exp_normalized) != sorted(act_normalized):
-            return False, "Result sets differ (unordered comparison)"
-        return True, ""
+        # Unordered: try sorted comparison first, then tolerance-based
+        if sorted(str(r) for r in exp_normalized) == sorted(str(r) for r in act_normalized):
+            return True, ""
+        # Fallback: check each expected row has a matching actual row within tolerance
+        unmatched_exp = list(exp_normalized)
+        unmatched_act = list(act_normalized)
+        for exp_row in exp_normalized:
+            for act_row in unmatched_act:
+                if _rows_close(exp_row, act_row):
+                    unmatched_act.remove(act_row)
+                    unmatched_exp.remove(exp_row)
+                    break
+        if not unmatched_exp and not unmatched_act:
+            return True, ""
+        return False, "Result sets differ (unordered comparison)"
 
 
 # ── Data Structures ─────────────────────────────────────────────────────────
@@ -607,6 +762,7 @@ class SQLTaskResult:
     difficulty: str
     model: str
     status: str = "error"  # "pass", "fail", "error"
+    score: float = 0.0  # 1.0 = pass, 0.5 = partial credit, 0.0 = fail/error
     generated_sql: str = ""
     actual_result: list[tuple] | None = None
     expected_result: list[tuple] | None = None
@@ -618,6 +774,7 @@ class SQLTaskResult:
     ttft_ms: float = 0.0
     total_ms: float = 0.0
     retries: int = 0
+    complexity: dict[str, int] = field(default_factory=dict)
 
 
 # ── Benchmark Runner ────────────────────────────────────────────────────────
@@ -687,7 +844,7 @@ def run_sql_question(
             return SQLTaskResult(
                 question_id=question.id, question=question.question,
                 difficulty=question.difficulty, model=model,
-                status="error", error_message=f"API error: {e}",
+                status="error", score=0.0, error_message=f"API error: {e}",
                 retries=retries,
             )
 
@@ -719,22 +876,29 @@ def run_sql_question(
             return SQLTaskResult(
                 question_id=question.id, question=question.question,
                 difficulty=question.difficulty, model=model,
-                status="pass", generated_sql=sql,
+                status="pass", score=1.0, generated_sql=sql,
                 actual_result=actual_rows, actual_columns=actual_cols,
                 expected_result=question.expected_result,
                 expected_columns=question.expected_columns,
                 speed_tps=tps, ttft_ms=ttft, total_ms=total_ms,
                 retries=retries,
+                complexity=_analyze_sql_complexity(sql),
             )
         else:
             last_error = reason
 
-    # All attempts exhausted
+    # All attempts exhausted — check for partial credit
     status = "fail" if last_sql and last_error else "error"
+    score = 0.0
+    if status == "fail" and last_actual_rows is not None:
+        # Partial credit: row count matches but values differ
+        if len(last_actual_rows) == len(question.expected_result):
+            score = 0.5
+
     return SQLTaskResult(
         question_id=question.id, question=question.question,
         difficulty=question.difficulty, model=model,
-        status=status, generated_sql=last_sql,
+        status=status, score=score, generated_sql=last_sql,
         actual_result=last_actual_rows,
         actual_columns=last_actual_cols,
         expected_result=question.expected_result,
@@ -742,6 +906,7 @@ def run_sql_question(
         error_message=last_error, mismatch_reason=last_error,
         speed_tps=last_tps, ttft_ms=last_ttft, total_ms=last_total_ms,
         retries=retries,
+        complexity=_analyze_sql_complexity(last_sql) if last_sql else {},
     )
 
 
@@ -916,6 +1081,7 @@ def results_to_record(
             "id": r.question_id,
             "difficulty": r.difficulty,
             "status": r.status,
+            "score": r.score,
             "sql": r.generated_sql,
             "tps": r.speed_tps,
             "ttft_ms": r.ttft_ms,
