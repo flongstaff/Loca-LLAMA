@@ -13,9 +13,9 @@ Usage (via CLI):
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
-import subprocess
 import sys
 import textwrap
 import time
@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .benchmark import detect_all_runtimes, RuntimeInfo
+
+logger = logging.getLogger(__name__)
 
 
 # --- Cloud Providers (via OpenRouter) ---
@@ -305,6 +307,9 @@ def call_openai_api(
                 break
             try:
                 chunk = json.loads(data)
+                if "error" in chunk:
+                    logger.warning("API error in SSE stream: %s", chunk["error"])
+                    continue
                 delta = chunk["choices"][0].get("delta", {})
                 content = delta.get("content", "")
                 if content:
@@ -410,7 +415,8 @@ def get_models_from_api(base_url: str, api_key: str | None = None) -> list[str]:
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read().decode())
             return [m["id"] for m in data.get("data", [])]
-    except Exception:
+    except (urllib.error.URLError, json.JSONDecodeError, OSError, TimeoutError) as e:
+        logger.warning("Failed to fetch models from %s: %s", base_url, e)
         return []
 
 
@@ -471,6 +477,7 @@ def run_quality_benchmark(
                     print(f"       error: {error}")
 
             except Exception as e:
+                logger.warning("Task %s failed for model %s: %s", task["name"], model, e)
                 print(f"ERROR: {e}")
                 results.append(TaskResult(
                     task_name=task["name"], model=model, category=task["category"], error=str(e),

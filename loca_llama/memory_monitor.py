@@ -6,11 +6,14 @@ memory gives us a complete picture of VRAM usage during inference.
 Uses only stdlib — no psutil or external dependencies required.
 """
 
+import logging
 import subprocess
 import sys
 import threading
 import time
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -63,8 +66,8 @@ def _get_total_memory_gb() -> float:
                 capture_output=True, text=True, timeout=5,
             )
             return int(result.stdout.strip()) / (1024**3)
-        except Exception:
-            pass
+        except (OSError, ValueError, subprocess.SubprocessError) as e:
+            logger.warning("_get_total_memory_gb: sysctl failed: %s", e)
 
     # Linux fallback
     try:
@@ -73,8 +76,8 @@ def _get_total_memory_gb() -> float:
                 if line.startswith("MemTotal:"):
                     kb = int(line.split()[1])
                     return kb / (1024**2)
-    except Exception:
-        pass
+    except (OSError, ValueError) as e:
+        logger.warning("_get_total_memory_gb: /proc/meminfo read failed: %s", e)
 
     return 0.0
 
@@ -127,7 +130,8 @@ def _get_memory_usage_darwin() -> tuple[float, float, str]:
         used_gb = used_bytes / (1024**3)
         free_gb = free_bytes / (1024**3)
 
-    except Exception:
+    except (OSError, ValueError, subprocess.SubprocessError) as e:
+        logger.warning("_get_memory_usage_darwin: vm_stat failed: %s", e)
         return 0.0, 0.0, "unknown"
 
     # Get memory pressure level
@@ -142,8 +146,8 @@ def _get_memory_usage_darwin() -> tuple[float, float, str]:
             pressure = "critical"
         elif "warn" in output_lower:
             pressure = "warn"
-    except Exception:
-        pass
+    except (OSError, subprocess.SubprocessError) as e:
+        logger.warning("_get_memory_usage_darwin: memory_pressure failed: %s", e)
 
     return used_gb, free_gb, pressure
 
@@ -179,7 +183,8 @@ def _get_memory_usage_linux() -> tuple[float, float, str]:
 
         return used_gb, free_gb, pressure
 
-    except Exception:
+    except (OSError, ValueError) as e:
+        logger.warning("_get_memory_usage_linux: /proc/meminfo read failed: %s", e)
         return 0.0, 0.0, "unknown"
 
 

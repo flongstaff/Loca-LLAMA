@@ -164,7 +164,8 @@ class LlamaCppConnector:
         try:
             with urllib.request.urlopen(f"{self.base_url}/slots", timeout=5) as resp:
                 return json.loads(resp.read().decode())
-        except Exception:
+        except (urllib.error.URLError, json.JSONDecodeError, OSError, TimeoutError) as e:
+            logger.debug("LlamaCppConnector.get_slots: %s", e)
             return []
 
     def chat(
@@ -235,7 +236,8 @@ class LlamaCppConnector:
                     data = json.loads(resp.read().decode())
                     if data.get("status") == "ok":
                         return proc
-            except Exception:
+            except (urllib.error.URLError, json.JSONDecodeError, OSError, TimeoutError) as e:
+                logger.debug("LlamaCppConnector.start_server: waiting for ready on port %s: %s", port, e)
                 if proc.poll() is not None:
                     return None
                 continue
@@ -258,7 +260,8 @@ class LiteLLMConnector:
             with urllib.request.urlopen(f"{self.base_url}/health", timeout=3) as resp:
                 data = json.loads(resp.read().decode())
                 return bool(data.get("healthy_endpoints") or data.get("status") == "healthy")
-        except Exception:
+        except (urllib.error.URLError, json.JSONDecodeError, OSError, TimeoutError) as e:
+            logger.debug("LiteLLMConnector.is_running: %s", e)
             return False
 
     def list_models(self) -> list[str]:
@@ -267,7 +270,8 @@ class LiteLLMConnector:
             with urllib.request.urlopen(f"{self.base_url}/v1/models", timeout=5) as resp:
                 data = json.loads(resp.read().decode())
                 return [m["id"] for m in data.get("data", [])]
-        except Exception:
+        except (urllib.error.URLError, json.JSONDecodeError, OSError, TimeoutError) as e:
+            logger.debug("LiteLLMConnector.list_models: %s", e)
             return []
 
     def chat(

@@ -258,7 +258,8 @@ def format_benchmark_error(exc: Exception, runtime_name: str, url: str) -> str:
         # Try to read error body for "Channel Error" (MLX model crash in LM Studio)
         try:
             body = exc.read().decode("utf-8", errors="replace")
-        except Exception:
+        except (OSError, ValueError) as e:
+            logger.debug("format_benchmark_error: could not read HTTP error body: %s", e)
             body = ""
         if "channel" in body.lower() or "channel" in str(exc.reason).lower():
             return f"Model crashed in {runtime_name} (Channel Error). The model may be unstable — try a smaller quantization or different model."
@@ -302,8 +303,8 @@ def _wait_for_server_ready(base_url: str, timeout: int = 30) -> bool:
                 data = json.loads(resp.read().decode())
                 if data.get("data"):
                     return True
-        except Exception:
-            pass
+        except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError, TimeoutError) as e:
+            logger.debug("_wait_for_server_ready: %s not ready yet: %s", base_url, e)
         time.sleep(1)
     return False
 
@@ -539,6 +540,7 @@ def benchmark_llama_cpp_native(
     except subprocess.TimeoutExpired:
         return _make_fail_result(Path(model_path).stem, "llama.cpp-cli", context_length, "Timed out (180s)", run_number)
     except Exception as e:
+        logger.warning("benchmark_llama_cpp_native failed: %s", e)
         return _make_fail_result(Path(model_path).stem, "llama.cpp-cli", context_length, str(e), run_number)
 
     total_ms = (time.perf_counter() - start) * 1000
@@ -748,7 +750,8 @@ def benchmark_with_server(
                     if data.get("status") == "ok":
                         healthy = True
                         break
-            except Exception:
+            except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError, TimeoutError) as e:
+                logger.debug("benchmark_with_server: waiting for %s to be healthy: %s", base_url, e)
                 continue
 
         if not healthy:
