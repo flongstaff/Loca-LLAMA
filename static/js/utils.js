@@ -67,3 +67,33 @@ export function formatDownloads(n) {
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
 }
+
+/**
+ * Copy text to clipboard and show brief visual feedback on the trigger button.
+ * @param {string} text - The text to copy
+ * @param {HTMLButtonElement} btn - The button that triggered the copy
+ */
+export async function copyToClipboard(text, btn) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Fallback for insecure contexts (localhost without HTTPS)
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+  }
+  if (btn) {
+    const original = btn.textContent;
+    btn.textContent = "Copied!";
+    btn.classList.add("copy-success");
+    setTimeout(() => {
+      btn.textContent = original;
+      btn.classList.remove("copy-success");
+    }, 1500);
+  }
+}

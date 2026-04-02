@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { escapeHtml } from "./utils.js";
+import { escapeHtml, copyToClipboard } from "./utils.js";
 import { drawBarChart, drawLineChart } from "./chart.js";
 
 let benchRuntimes = [];
@@ -235,8 +235,9 @@ function renderBenchmarkStatus(data) {
       </table>`;
   }
 
-  // Export buttons
-  html += `<div class="mt-3">
+  // Export and copy buttons
+  html += `<div class="mt-3 results-actions">
+    <button class="btn btn-copy" id="bench-copy-btn" title="Copy summary to clipboard">Copy Results</button>
     <button class="btn btn-export" id="bench-export-btn">Export JSON</button>
     <button class="btn btn-export ml-2" id="bench-export-html-btn">Export HTML Report</button>
   </div>`;
@@ -260,9 +261,13 @@ function renderBenchmarkStatus(data) {
     }
   }
 
-  // Wire export buttons
+  // Wire export and copy buttons
   document.getElementById("bench-export-btn").addEventListener("click", () => exportJson(lastBenchResult, "benchmark"));
   document.getElementById("bench-export-html-btn").addEventListener("click", exportHtmlReport);
+  document.getElementById("bench-copy-btn").addEventListener("click", (e) => {
+    const text = formatBenchmarkText(data);
+    copyToClipboard(text, e.currentTarget);
+  });
 }
 
 async function exportHtmlReport() {
@@ -574,7 +579,10 @@ function renderSweepStatus(data) {
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
-      <button class="btn btn-export mt-3" id="sweep-export-btn">Export JSON</button>
+      <div class="mt-3 results-actions">
+        <button class="btn btn-copy" id="sweep-copy-btn" title="Copy comparison to clipboard">Copy Results</button>
+        <button class="btn btn-export" id="sweep-export-btn">Export JSON</button>
+      </div>
       <div class="chart-container mt-4"><canvas id="bench-sweep-chart"></canvas></div>
     </div>`;
 
@@ -593,8 +601,12 @@ function renderSweepStatus(data) {
     }
   }
 
-  // Wire export button
+  // Wire export and copy buttons
   document.getElementById("sweep-export-btn").addEventListener("click", () => exportJson(lastSweepResult, "sweep"));
+  document.getElementById("sweep-copy-btn").addEventListener("click", (e) => {
+    const text = formatSweepText(data);
+    copyToClipboard(text, e.currentTarget);
+  });
 }
 
 function exportJson(data, prefix) {
@@ -727,7 +739,10 @@ function renderThroughputStatus(data) {
 
   resultsDiv.innerHTML = `
     <div class="detail-panel detail-panel--visible mb-4">
-      <h3>Throughput Results (${data.concurrency} concurrent, ${data.total_requests} requests)</h3>
+      <div class="detail-header-row">
+        <h3>Throughput Results (${data.concurrency} concurrent, ${data.total_requests} requests)</h3>
+        <button class="btn btn-copy btn-copy-sm" id="throughput-copy-btn" title="Copy throughput results">Copy</button>
+      </div>
       <div class="detail-grid">
         <div class="detail-item"><span class="label">Aggregate Throughput</span><span class="value font-bold">${data.throughput_tps} tok/s</span></div>
         <div class="detail-item"><span class="label">Total Tokens</span><span class="value">${data.total_tokens}</span></div>
@@ -739,6 +754,11 @@ function renderThroughputStatus(data) {
         <div class="detail-item"><span class="label">Error Rate</span><span class="value">${(data.error_rate * 100).toFixed(1)}%</span></div>
       </div>
     </div>`;
+
+  document.getElementById("throughput-copy-btn").addEventListener("click", (e) => {
+    const text = formatThroughputText(data);
+    copyToClipboard(text, e.currentTarget);
+  });
 
   // Per-request table
   if (data.per_request && data.per_request.length > 0) {
@@ -923,7 +943,15 @@ function renderCompareStatus(data) {
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
+    <div class="mt-3 results-actions">
+      <button class="btn btn-copy" id="compare-copy-btn" title="Copy comparison to clipboard">Copy Results</button>
+    </div>
     <div class="chart-container mt-4"><canvas id="bench-compare-chart"></canvas></div>`;
+
+  document.getElementById("compare-copy-btn").addEventListener("click", (e) => {
+    const text = formatCompareText(data);
+    copyToClipboard(text, e.currentTarget);
+  });
 
   // Draw comparison bar chart
   const chartData = data.results
@@ -933,6 +961,133 @@ function renderCompareStatus(data) {
   if (canvas && chartData.length > 0) {
     drawBarChart(canvas, chartData, { title: "Avg tok/s by Runtime", unit: "", height: 200 });
   }
+}
+
+// ── Copy-to-clipboard text formatters ─────────────────────────────────
+
+function formatBenchmarkText(data) {
+  const lines = ["Loca-LLAMA Benchmark Results", "=".repeat(40)];
+
+  if (data.aggregate) {
+    const a = data.aggregate;
+    lines.push(
+      `Runs: ${a.runs} (warmup skipped)`,
+      "",
+      "Key Metrics:",
+      `  Avg tok/s:         ${a.avg_tok_per_sec}`,
+      `  Median tok/s:      ${a.median_tok_per_sec}`,
+      `  P95 tok/s:         ${a.p95_tok_per_sec}`,
+      `  Min / Max tok/s:   ${a.min_tok_per_sec} / ${a.max_tok_per_sec}`,
+      `  Std Dev:           ${a.stddev_tok_per_sec}`,
+      `  Avg Prefill tok/s: ${a.avg_prefill_tok_per_sec}`,
+      `  Avg TTFT:          ${a.avg_ttft_ms} ms`,
+      `  Avg Total:         ${a.avg_total_ms} ms`,
+      `  Tokens Generated:  ${a.total_tokens_generated}`,
+    );
+  }
+
+  if (data.runs && data.runs.length > 0) {
+    lines.push("", "Per-Run Results:", "Run  Status  tok/s    Prefill  TTFT(ms)  Total(ms)");
+    lines.push("-".repeat(55));
+    data.runs.forEach((r) => {
+      lines.push(
+        `${String(r.run_number).padStart(3)}  ${(r.success ? "Pass" : "Fail").padEnd(6)}  ` +
+        `${String(r.tokens_per_second).padStart(7)}  ${String(r.prompt_tokens_per_second).padStart(7)}  ` +
+        `${String(r.time_to_first_token_ms).padStart(8)}  ${String(r.total_time_ms).padStart(9)}`
+      );
+    });
+  }
+
+  return lines.join("\n");
+}
+
+function formatSweepText(data) {
+  const lines = ["Loca-LLAMA Sweep Comparison", "=".repeat(50)];
+
+  if (!data.combo_results || data.combo_results.length === 0) {
+    lines.push("No results.");
+    return lines.join("\n");
+  }
+
+  const nameW = Math.max(5, ...data.combo_results.map((cr) => cr.model_id.length));
+  const hdr = `${"Model".padEnd(nameW)}  Avg tok/s  Min  Max  Prefill  TTFT     Runs`;
+  lines.push(hdr, "-".repeat(hdr.length));
+
+  data.combo_results.forEach((cr) => {
+    const a = cr.aggregate;
+    if (!a || a.runs === 0) {
+      lines.push(`${cr.model_id.padEnd(nameW)}  FAILED`);
+      return;
+    }
+    lines.push(
+      `${cr.model_id.padEnd(nameW)}  ` +
+      `${String(a.avg_tok_per_sec).padStart(9)}  ` +
+      `${String(a.min_tok_per_sec).padStart(3)}  ` +
+      `${String(a.max_tok_per_sec).padStart(3)}  ` +
+      `${String(a.avg_prefill_tok_per_sec).padStart(7)}  ` +
+      `${(a.avg_ttft_ms + " ms").padStart(7)}  ` +
+      `${String(a.runs).padStart(4)}`
+    );
+  });
+
+  return lines.join("\n");
+}
+
+function formatThroughputText(data) {
+  return [
+    "Loca-LLAMA Throughput Test",
+    "=".repeat(40),
+    `Concurrency:   ${data.concurrency}`,
+    `Total Requests: ${data.total_requests}`,
+    "",
+    "Results:",
+    `  Throughput:    ${data.throughput_tps} tok/s`,
+    `  Total Tokens:  ${data.total_tokens}`,
+    `  Elapsed:       ${data.elapsed_seconds}s`,
+    `  Success/Fail:  ${data.successful_requests} / ${data.failed_requests}`,
+    `  Avg Latency:   ${data.avg_latency_ms} ms`,
+    `  Min Latency:   ${data.min_latency_ms} ms`,
+    `  Max Latency:   ${data.max_latency_ms} ms`,
+    `  Error Rate:    ${(data.error_rate * 100).toFixed(1)}%`,
+  ].join("\n");
+}
+
+function formatCompareText(data) {
+  const lines = ["Loca-LLAMA Runtime Comparison", "=".repeat(50)];
+
+  if (data.speedup_pct != null) {
+    lines.push(`Winner: ${data.faster_runtime} (+${data.speedup_pct}% faster)`, "");
+  }
+
+  if (!data.results || data.results.length === 0) {
+    lines.push("No results.");
+    return lines.join("\n");
+  }
+
+  const nameW = Math.max(7, ...data.results.map((cr) => cr.runtime_name.length));
+  const hdr = `${"Runtime".padEnd(nameW)}  Avg tok/s  Median  P95   Min   Max   Prefill  TTFT     Runs`;
+  lines.push(hdr, "-".repeat(hdr.length));
+
+  data.results.forEach((cr) => {
+    const a = cr.aggregate;
+    if (!a || a.runs === 0) {
+      lines.push(`${cr.runtime_name.padEnd(nameW)}  FAILED`);
+      return;
+    }
+    lines.push(
+      `${cr.runtime_name.padEnd(nameW)}  ` +
+      `${String(a.avg_tok_per_sec).padStart(9)}  ` +
+      `${String(a.median_tok_per_sec).padStart(6)}  ` +
+      `${String(a.p95_tok_per_sec).padStart(4)}  ` +
+      `${String(a.min_tok_per_sec).padStart(4)}  ` +
+      `${String(a.max_tok_per_sec).padStart(4)}  ` +
+      `${String(a.avg_prefill_tok_per_sec).padStart(7)}  ` +
+      `${(a.avg_ttft_ms + " ms").padStart(7)}  ` +
+      `${String(a.runs).padStart(4)}`
+    );
+  });
+
+  return lines.join("\n");
 }
 
 export function initBenchmark() {
