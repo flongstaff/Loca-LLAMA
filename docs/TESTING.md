@@ -34,6 +34,15 @@ pytest tests/test_analyzer.py -v
 
 # Benchmark tests
 pytest tests/test_benchmark*.py -v
+
+# SQL benchmark tests
+pytest tests/test_sql_bench.py -v
+
+# Unified report tests
+pytest tests/test_unified_report.py -v
+
+# Benchmark improvement tests (eval extraction, percentiles)
+pytest tests/test_benchmark_improvements.py -v
 ```
 
 ## Testing the Web Interface
@@ -86,7 +95,10 @@ Key endpoints:
 | `GET /api/models` | List all models |
 | `POST /api/analyze` | Run compatibility analysis |
 | `POST /api/recommend` | Get model recommendations |
-| `POST /api/benchmark/start` | Start benchmark run |
+| `POST /api/benchmark/start` | Start speed benchmark run |
+| `POST /api/benchmark/sql` | Start SQL benchmark |
+| `GET /api/benchmark/sql/{id}` | Poll SQL benchmark status |
+| `GET /api/benchmark/sql/{id}/report` | SQL benchmark HTML report |
 | `GET /api/memory/current` | Current memory stats |
 
 ## Troubleshooting

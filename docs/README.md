@@ -20,17 +20,23 @@ When running the web server, full OpenAPI/Swagger documentation is available at:
 
 ```
 loca-llama/
-├── loca_llama/          # Core Python package
-│   ├── analyzer.py     # Memory/performance estimation
-│   ├── benchmark.py    # Inference benchmarking
-│   ├── cli.py         # CLI commands
-│   ├── hardware.py    # Apple Silicon database
-│   ├── models.py      # LLM model database
-│   └── api/           # FastAPI web interface
-├── static/            # Frontend assets (HTML, CSS, JS)
-├── tests/             # Test suite
-├── docs/              # Documentation
-└── README.md          # Main documentation
+├── loca_llama/              # Core Python package
+│   ├── analyzer.py          # Memory/performance estimation
+│   ├── cli.py               # CLI commands
+│   ├── hardware.py          # Apple Silicon database
+│   ├── models.py            # LLM model database
+│   ├── benchmark.py         # Speed benchmarks (tok/s, TTFT, percentiles)
+│   ├── quality_bench.py     # 10 coding/reasoning quality tasks
+│   ├── eval_benchmarks.py   # Standard evals (GSM8K, ARC, etc.)
+│   ├── sql_bench.py         # 25 SQL generation questions
+│   ├── throughput.py        # Concurrent throughput testing
+│   ├── unified_report.py    # Unified HTML mega-report
+│   ├── benchmark_results.py # Result storage + hardware detection
+│   └── api/                 # FastAPI web interface
+├── static/                  # Frontend assets (HTML, CSS, JS)
+├── tests/                   # Test suite
+├── docs/                    # Documentation
+└── README.md                # Main documentation
 ```
 
 ## Additional Resources

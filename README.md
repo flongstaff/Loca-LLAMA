@@ -15,7 +15,8 @@ Loca-LLAMA analyzes your Apple Silicon Mac's specs (memory, bandwidth, GPU) and 
 - **GPU & batch optimization** — Find optimal GPU layer allocation and batch sizes
 - **Local model scanner** — Auto-detect models from LM Studio, llama.cpp, HuggingFace cache, and MLX
 - **HuggingFace search** — Browse and search GGUF and MLX models online
-- **Benchmarks** — Run inference benchmarks with batch size and context length sweeps
+- **Comprehensive benchmarking** — Speed (tok/s, TTFT, percentiles), quality (10 coding tasks), SQL generation (25 questions), standard evals (GSM8K, ARC, HellaSwag, IFEval, HumanEval, MMLU), concurrent throughput
+- **Unified HTML reports** — Rich scorecard with leaderboard, heatmaps, radar charts, per-model detail cards
 - **Three interfaces** — CLI commands, interactive terminal UI, and a web dashboard
 - **Zero core dependencies** — Pure Python 3.11+, no pip installs needed for CLI/TUI
 
@@ -129,7 +130,42 @@ loca-llama batch-optimize --model "Qwen 2.5 32B" --preference high  # Max throug
 ### Run benchmarks
 
 ```bash
+# Legacy: benchmark with model file
 loca-llama benchmark --model "Llama 3.1 8B" --model-path /path/to/model.gguf
+
+# Speed benchmark (against running LM Studio, oMLX, or llama.cpp server)
+loca-llama speed                             # Auto-detect runtime + model
+loca-llama speed --sweep                     # Benchmark all loaded models
+loca-llama speed --prompt coding --runs 5    # Coding prompt, 5 runs
+
+# Quality benchmark (10 coding/reasoning tasks with code execution)
+loca-llama quality                           # All loaded models
+loca-llama quality --compare claude          # Compare local vs Claude
+
+# SQL generation benchmark (25 questions, 4 difficulty tiers)
+loca-llama sql                               # All loaded models
+loca-llama sql --difficulty easy,medium       # Filter tiers
+loca-llama sql --export html --output r.html  # HTML heatmap report
+
+# Standard LLM evaluations (GSM8K, ARC, HellaSwag, IFEval, HumanEval, MMLU)
+loca-llama eval                              # Run all benchmarks
+loca-llama eval --bench gsm8k humaneval      # Specific benchmarks
+loca-llama eval --samples 50                 # Quick run with fewer samples
+
+# Concurrent throughput test
+loca-llama throughput --concurrency 4 --requests 8
+
+# Unified report (combines all saved benchmark results)
+loca-llama report                            # Generate HTML scorecard
+loca-llama report --models Qwen,Llama        # Filter models
+loca-llama report --output scorecard.html    # Custom path
+
+# View saved results
+loca-llama results                           # All results
+loca-llama results --type sql --compare      # Side-by-side comparison
+
+# Live proxy monitor
+loca-llama monitor                           # Monitor LLM API traffic
 ```
 
 ### Show memory status
@@ -154,7 +190,7 @@ Run `loca-llama-ui` for a menu-driven terminal interface:
 2. **Scan Local Models** — Find GGUF/MLX models already downloaded on your Mac
 3. **Search HuggingFace** — Browse and discover GGUF and MLX models
 4. **Detailed Model Analysis** — Deep dive: memory breakdown, context scaling table, speed estimates
-5. **Benchmark** — Run actual inference tests comparing LM Studio and llama.cpp
+5. **Benchmark** — Run speed, quality, SQL, and evaluation benchmarks against local models
 
 ## Web Interface
 

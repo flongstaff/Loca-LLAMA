@@ -23,17 +23,26 @@ python -m loca_llama.api.app
 
 ```
 loca_llama/
-├── analyzer.py      # Core memory/performance estimation
-├── benchmark.py     # Inference benchmarking
-├── cli.py          # CLI commands
-├── hardware.py     # Apple Silicon database
-├── hub.py          # HuggingFace integration
-├── interactive.py  # Terminal UI
-├── models.py       # LLM model database
-├── quantization.py # Quantization formats
-├── runtime.py      # Runtime detection
-├── scanner.py      # Local model scanner
-└── api/            # FastAPI web interface
+├── analyzer.py          # Core memory/performance estimation
+├── cli.py               # CLI commands
+├── hardware.py          # Apple Silicon database
+├── hub.py               # HuggingFace integration
+├── interactive.py       # Terminal UI
+├── models.py            # LLM model database
+├── quantization.py      # Quantization formats
+├── runtime.py           # Runtime detection
+├── scanner.py           # Local model scanner
+├── benchmark.py         # Speed benchmarks (tok/s, TTFT, percentiles)
+├── quality_bench.py     # 10 coding/reasoning quality tasks
+├── eval_benchmarks.py   # Standard evals (GSM8K, ARC, HellaSwag, IFEval, HumanEval, MMLU)
+├── sql_bench.py         # 25 SQL generation questions across difficulty tiers
+├── throughput.py        # Concurrent throughput testing
+├── benchmark_results.py # Unified result storage + hardware detection
+├── benchmark_report.py  # HTML speed benchmark reports
+├── sql_bench_report.py  # HTML SQL heatmap reports
+├── unified_report.py    # Unified mega-report (all benchmarks combined)
+├── code_sandbox.py      # Safe code execution sandbox
+└── api/                 # FastAPI web interface
 ```
 
 ## Adding New Models
