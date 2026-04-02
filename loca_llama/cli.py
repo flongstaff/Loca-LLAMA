@@ -286,7 +286,7 @@ def build_parser() -> argparse.ArgumentParser:
     # ── results ──
     results = sub.add_parser("results", help="View saved benchmark results")
     results.add_argument("--model", help="Filter by model name")
-    results.add_argument("--type", choices=["speed", "quality", "monitor", "eval", "sql"], help="Filter by type")
+    results.add_argument("--type", choices=["speed", "quality", "monitor", "eval", "sql", "throughput"], help="Filter by type")
     results.add_argument("--compare", action="store_true", help="Side-by-side latest per model")
     results.add_argument("--limit", type=int, default=30, help="Max results to show (default: 30)")
     results.add_argument("--export", choices=["csv", "html", "md"], help="Export format")

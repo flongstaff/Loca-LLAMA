@@ -94,6 +94,8 @@ class BenchmarkRecord:
     cloud_scores: dict[str, Any] = field(default_factory=dict)
 
     # Extra metadata
+    # Conventions: extra["cost_cents"] = total cost in cents for the run
+    #              extra["cost_per_1k_tokens"] = cost per 1k tokens
     extra: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -199,6 +201,18 @@ def print_results_table(records: list[BenchmarkRecord]) -> None:
             score_str = f"{total_pass}/{total_q}" if total_q else "—"
             tps_str = f"{r.tokens_per_second:.1f}" if r.tokens_per_second else "—"
             print(f"{r.type:<10} {model_short:<45} {score_str:>7} {tps_str:>8} {date_str:>12}")
+        elif r.type == "eval":
+            # Show average score across eval benchmarks
+            scores = [v["score"] for v in r.quality_scores.values()
+                      if isinstance(v, dict) and "score" in v]
+            avg_score = sum(scores) / len(scores) if scores else 0
+            n_bench = len(scores)
+            print(f"{r.type:<10} {model_short:<45} {'avg=' + f'{avg_score:.0%}':>7} {f'{n_bench} bench':>8} {date_str:>12}")
+        elif r.type == "throughput":
+            tp_tps = r.throughput_stats.get("throughput_tps", r.tokens_per_second)
+            conc = r.throughput_stats.get("concurrency", "")
+            conc_str = f"c={conc}" if conc else "—"
+            print(f"{r.type:<10} {model_short:<45} {tp_tps:>6.1f} {conc_str:>8} {date_str:>12}")
         elif r.type == "monitor":
             reqs = r.monitor_stats.get("total_requests", 0)
             avg_tps = r.monitor_stats.get("avg_tps", 0)
