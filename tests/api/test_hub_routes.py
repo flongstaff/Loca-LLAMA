@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import urllib.error
 from unittest.mock import patch
 
 import pytest
@@ -167,7 +168,7 @@ async def test_get_config_fields(mock_cfg, client):
 
 
 @pytest.mark.anyio
-@patch("loca_llama.api.routes.hub.search_huggingface", side_effect=Exception("Network error"))
+@patch("loca_llama.api.routes.hub.search_huggingface", side_effect=urllib.error.URLError("Network error"))
 async def test_search_hub_network_error(mock_search, client):
     """GET /api/hub/search returns 502 on network failure."""
     resp = await client.get("/api/hub/search?query=llama")
@@ -177,7 +178,7 @@ async def test_search_hub_network_error(mock_search, client):
 
 
 @pytest.mark.anyio
-@patch("loca_llama.api.routes.hub.get_model_files", side_effect=Exception("Timeout"))
+@patch("loca_llama.api.routes.hub.get_model_files", side_effect=urllib.error.URLError("Timeout"))
 async def test_get_files_network_error(mock_files, client):
     """GET /api/hub/files returns 502 on network failure."""
     resp = await client.get("/api/hub/files/some/repo")
@@ -185,7 +186,7 @@ async def test_get_files_network_error(mock_files, client):
 
 
 @pytest.mark.anyio
-@patch("loca_llama.api.routes.hub.fetch_hf_model_config", side_effect=Exception("404"))
+@patch("loca_llama.api.routes.hub.fetch_hf_model_config", side_effect=urllib.error.URLError("404"))
 async def test_get_config_network_error(mock_cfg, client):
     """GET /api/hub/config returns 502 on fetch failure."""
     resp = await client.get("/api/hub/config/some/repo")

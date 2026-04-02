@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -83,10 +84,10 @@ class QuantListResponse(BaseModel):
 # ── Analysis ─────────────────────────────────────────────────────────────────
 
 class AnalyzeRequest(BaseModel):
-    hardware_name: str
-    model_name: str
-    quant_name: str
-    context_length: int | None = None
+    hardware_name: str = Field(..., min_length=1, max_length=100)
+    model_name: str = Field(..., min_length=1, max_length=200)
+    quant_name: str = Field(..., min_length=1, max_length=50)
+    context_length: int | None = Field(None, ge=128, le=131072)
 
 
 class AnalyzeResponse(BaseModel):
@@ -110,12 +111,12 @@ class AnalyzeResponse(BaseModel):
 
 
 class AnalyzeAllRequest(BaseModel):
-    hardware_name: str
+    hardware_name: str = Field(..., min_length=1, max_length=100)
     quant_names: list[str] | None = None
-    context_length: int | None = None
+    context_length: int | None = Field(None, ge=128, le=131072)
     only_fits: bool = False
     include_partial: bool = False
-    family: str | None = None
+    family: str | None = Field(None, max_length=100)
 
 
 class TierSummary(BaseModel):
@@ -134,9 +135,9 @@ class AnalyzeAllResponse(BaseModel):
 
 
 class MaxContextRequest(BaseModel):
-    hardware_name: str
-    model_name: str
-    quant_name: str
+    hardware_name: str = Field(..., min_length=1, max_length=100)
+    model_name: str = Field(..., min_length=1, max_length=200)
+    quant_name: str = Field(..., min_length=1, max_length=50)
 
 
 class MaxContextResponse(BaseModel):
@@ -149,7 +150,7 @@ class MaxContextResponse(BaseModel):
 # ── Recommend ───────────────────────────────────────────────────────────────
 
 class RecommendRequest(BaseModel):
-    hardware_name: str
+    hardware_name: str = Field(..., min_length=1, max_length=100)
     use_case: Literal["general", "coding", "reasoning", "small", "large-context"] = "general"
 
 
@@ -259,7 +260,7 @@ class TemplateListResponse(BaseModel):
 
 
 class LMStudioPresetRequest(BaseModel):
-    model_name: str
+    model_name: str = Field(..., min_length=1, max_length=200)
 
 
 class LMStudioPresetResponse(BaseModel):
@@ -269,20 +270,24 @@ class LMStudioPresetResponse(BaseModel):
     system_prompt: str | None = None
 
 
+_MODEL_PATH_RE = re.compile(r"^[a-zA-Z0-9._/ -]+$")
+
+
 class LlamaCppCommandRequest(BaseModel):
-    model_name: str
-    model_path: str
-    context_length: int | None = None
-    n_gpu_layers: int = -1
+    model_name: str = Field(..., min_length=1, max_length=200)
+    model_path: str = Field(..., min_length=1, max_length=500)
+    context_length: int | None = Field(None, ge=128, le=131072)
+    n_gpu_layers: int = Field(-1, ge=-1, le=999)
     sampling_overrides: dict[str, float | int] | None = None
 
     @field_validator("model_path")
     @classmethod
     def reject_shell_metacharacters(cls, v: str) -> str:
-        _SHELL_METACHARS = set(';|&$`(){}[]<>\n\r')
-        bad = [c for c in v if c in _SHELL_METACHARS]
-        if bad:
-            raise ValueError(f"model_path contains disallowed characters: {bad}")
+        if not _MODEL_PATH_RE.match(v):
+            raise ValueError(
+                "model_path must only contain alphanumeric characters, "
+                "dots, underscores, slashes, hyphens, and spaces"
+            )
         return v
 
 
@@ -569,3 +574,61 @@ class MemoryReportResponse(BaseModel):
     baseline_pct: float
     duration_sec: float
     sample_count: int
+
+
+# ── SQL Benchmark ────────────────────────────────────────────────────────────
+
+class SqlBenchStartRequest(BaseModel):
+    runtime_name: str
+    model_ids: list[str] = Field(..., min_length=1, max_length=10)
+    difficulties: list[str] | None = None
+    max_retries: int = Field(default=2, ge=0, le=5)
+
+    @field_validator("difficulties")
+    @classmethod
+    def validate_difficulties(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            valid = {"trivial", "easy", "medium", "hard"}
+            for d in v:
+                if d.lower() not in valid:
+                    raise ValueError(f"Invalid difficulty: {d}. Must be one of {valid}")
+        return v
+
+
+class SqlBenchQuestionResult(BaseModel):
+    question_id: int
+    question: str
+    difficulty: str
+    status: str  # "pass", "fail", "error"
+    generated_sql: str = ""
+    error_message: str = ""
+    speed_tps: float = 0.0
+    ttft_ms: float = 0.0
+    total_ms: float = 0.0
+    retries: int = 0
+
+
+class SqlBenchModelResult(BaseModel):
+    model_id: str
+    total_pass: int = 0
+    total_fail: int = 0
+    total_error: int = 0
+    score_by_difficulty: dict[str, dict[str, int]] = Field(default_factory=dict)
+    avg_tps: float = 0.0
+    avg_ttft_ms: float = 0.0
+    questions: list[SqlBenchQuestionResult] = Field(default_factory=list)
+
+
+class SqlBenchProgress(BaseModel):
+    current_model: int
+    total_models: int
+    current_question: int
+    total_questions: int
+
+
+class SqlBenchStatusResponse(BaseModel):
+    job_id: str
+    status: str
+    progress: SqlBenchProgress | None = None
+    model_results: list[SqlBenchModelResult] | None = None
+    error: str | None = None

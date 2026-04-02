@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
+import urllib.error
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
 
-_REPO_ID_RE = re.compile(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$")
+_REPO_ID_RE = re.compile(r"^[a-zA-Z0-9._-]{1,80}/[a-zA-Z0-9._-]{1,80}$")
 
 
 def _validate_repo_id(repo_id: str) -> None:
@@ -46,9 +48,12 @@ async def search_hub(
             raw = await asyncio.to_thread(search_mlx_models, query, limit)
         else:
             raw = await asyncio.to_thread(search_huggingface, query, limit, sort)
-    except Exception as e:
-        logger.error("Hub search error: %s", e)
+    except urllib.error.URLError as e:
+        logger.error("Hub search network error: %s", e)
         raise HTTPException(status_code=502, detail="HuggingFace API error: check server logs for details")
+    except (ValueError, KeyError) as e:
+        logger.error("Hub search data error: %s", e)
+        raise HTTPException(status_code=502, detail="HuggingFace API returned unexpected data")
 
     results = [
         HubModelResponse(
@@ -75,9 +80,12 @@ async def get_files(repo_id: str) -> HubFilesResponse:
     _validate_repo_id(repo_id)
     try:
         raw = await asyncio.to_thread(get_model_files, repo_id)
-    except Exception as e:
-        logger.error("Hub files error for %s: %s", repo_id, e)
+    except urllib.error.URLError as e:
+        logger.error("Hub files network error for %s: %s", repo_id, e)
         raise HTTPException(status_code=502, detail="HuggingFace API error: check server logs for details")
+    except (ValueError, KeyError, json.JSONDecodeError) as e:
+        logger.error("Hub files data error for %s: %s", repo_id, e)
+        raise HTTPException(status_code=502, detail="HuggingFace API returned unexpected data")
 
     files = [
         HubFileResponse(filename=f["filename"], size=f.get("size") or 0)
@@ -93,9 +101,12 @@ async def get_config(repo_id: str) -> HubConfigResponse:
     _validate_repo_id(repo_id)
     try:
         cfg = await asyncio.to_thread(fetch_hf_model_config, repo_id)
-    except Exception as e:
-        logger.error("Hub config error for %s: %s", repo_id, e)
+    except urllib.error.URLError as e:
+        logger.error("Hub config network error for %s: %s", repo_id, e)
         raise HTTPException(status_code=502, detail="HuggingFace API error: check server logs for details")
+    except (ValueError, KeyError) as e:
+        logger.error("Hub config data error for %s: %s", repo_id, e)
+        raise HTTPException(status_code=502, detail="HuggingFace API returned unexpected data")
 
     return HubConfigResponse(
         repo_id=cfg.repo_id,

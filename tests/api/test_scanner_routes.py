@@ -92,13 +92,22 @@ async def test_scan_local_empty(mock_scan, client):
 
 @pytest.mark.anyio
 @patch("loca_llama.api.routes.scanner.scan_custom_dir", return_value=MOCK_MODELS[:1])
-async def test_scan_custom_dir(mock_scan, client):
+@patch("loca_llama.api.routes.scanner._validate_custom_dir")
+async def test_scan_custom_dir(mock_validate, mock_scan, client):
     """GET /api/scanner/local?custom_dir= uses scan_custom_dir."""
     resp = await client.get("/api/scanner/local?custom_dir=/my/models")
     assert resp.status_code == 200
     data = resp.json()
     assert data["count"] == 1
     mock_scan.assert_called_once_with("/my/models")
+
+
+@pytest.mark.anyio
+async def test_scan_custom_dir_path_traversal(client):
+    """GET /api/scanner/local rejects paths outside allowed directories."""
+    resp = await client.get("/api/scanner/local?custom_dir=/etc/passwd")
+    assert resp.status_code == 400
+    assert "custom_dir must be under" in resp.json()["detail"]
 
 
 @pytest.mark.anyio

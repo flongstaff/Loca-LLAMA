@@ -94,6 +94,9 @@ async def get_recommendations(req: RecommendRequest) -> RecommendResponse:
         )
     except HTTPException:
         raise
-    except Exception as e:
+    except (KeyError, ValueError) as e:
+        logger.error("Recommend input error: %s", e)
+        raise HTTPException(status_code=400, detail="Invalid request parameters")
+    except Exception:
         logger.exception("Recommend endpoint error")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Failed to generate recommendations")
