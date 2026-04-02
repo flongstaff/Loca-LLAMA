@@ -454,6 +454,123 @@ def generate_sql_report(
 <script>
 (function() {{
   const data = {chart_data_json};
+
+  // ── Agentic loop flowchart ──────────────────────────────────────────
+  (function drawFlowChart() {{
+    const canvas = document.getElementById('flowChart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const W = rect.width, H = 280;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    ctx.scale(dpr, dpr);
+    const s = getComputedStyle(document.documentElement);
+    const c = {{
+      accent: s.getPropertyValue('--accent').trim() || '#7aa2f7',
+      green: s.getPropertyValue('--green').trim() || '#9ece6a',
+      red: s.getPropertyValue('--red').trim() || '#f7768e',
+      orange: s.getPropertyValue('--orange').trim() || '#ff9e64',
+      text: s.getPropertyValue('--text').trim() || '#e2e8f0',
+      dim: s.getPropertyValue('--text-dim').trim() || '#8892b0',
+      bg: s.getPropertyValue('--surface2').trim() || '#222640',
+      border: s.getPropertyValue('--border').trim() || '#2d3154',
+    }};
+    const bw = 120, bh = 36, dw = 90, dh = 50;
+    const cy = H / 2;
+
+    function box(x, y, w, h, label, color) {{
+      ctx.fillStyle = color + '22';
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.roundRect(x - w/2, y - h/2, w, h, 6); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = c.text; ctx.font = '12px -apple-system, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(label, x, y);
+    }}
+    function diamond(x, y, w, h, label, color) {{
+      ctx.fillStyle = color + '22';
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(x, y - h/2); ctx.lineTo(x + w/2, y); ctx.lineTo(x, y + h/2); ctx.lineTo(x - w/2, y);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = c.text; ctx.font = '11px -apple-system, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(label, x, y);
+    }}
+    function arrow(x1, y1, x2, y2, color) {{
+      ctx.strokeStyle = color || c.dim; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      const angle = Math.atan2(y2 - y1, x2 - x1);
+      ctx.fillStyle = color || c.dim;
+      ctx.beginPath();
+      ctx.moveTo(x2, y2);
+      ctx.lineTo(x2 - 8 * Math.cos(angle - 0.4), y2 - 8 * Math.sin(angle - 0.4));
+      ctx.lineTo(x2 - 8 * Math.cos(angle + 0.4), y2 - 8 * Math.sin(angle + 0.4));
+      ctx.closePath(); ctx.fill();
+    }}
+    function arrowLabel(x, y, label, color) {{
+      ctx.fillStyle = color || c.dim;
+      ctx.font = '10px -apple-system, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(label, x, y);
+    }}
+
+    // Positions (spread across width)
+    const xs = [0.08, 0.24, 0.42, 0.60, 0.78].map(p => p * W);
+    const x1 = xs[0], x2 = xs[1], x3 = xs[2], x4 = xs[3], x5 = xs[4];
+
+    // Main flow boxes
+    box(x1, cy, bw, bh, 'Schema + Query', c.accent);
+    box(x2, cy, bw, bh, 'LLM generates SQL', c.accent);
+    box(x3, cy, bw, bh, 'Execute SQL', c.accent);
+    diamond(x4, cy, dw + 10, dh, 'Match?', c.orange);
+
+    // Arrows between main boxes
+    arrow(x1 + bw/2, cy, x2 - bw/2, cy, c.dim);
+    arrow(x2 + bw/2, cy, x3 - bw/2, cy, c.dim);
+    arrow(x3 + bw/2, cy, x4 - (dw+10)/2, cy, c.dim);
+
+    // Pass path (down from diamond)
+    const passY = cy + 80;
+    box(x4, passY, bw, bh, 'Record PASS', c.green);
+    arrow(x4, cy + dh/2, x4, passY - bh/2, c.green);
+    arrowLabel(x4 + 16, cy + dh/2 + 12, 'Yes', c.green);
+
+    // Fail/retry path (right from diamond)
+    diamond(x5, cy, dw, dh, 'Retries < 2?', c.orange);
+    arrow(x4 + (dw+10)/2, cy, x5 - dw/2, cy, c.red);
+    arrowLabel((x4 + (dw+10)/2 + x5 - dw/2) / 2, cy - 10, 'No', c.red);
+
+    // Record FAIL (down from retries diamond)
+    box(x5, passY, bw, bh, 'Record FAIL', c.red);
+    arrow(x5, cy + dh/2, x5, passY - bh/2, c.red);
+    arrowLabel(x5 + 16, cy + dh/2 + 12, 'No', c.red);
+
+    // Retry loop (up from retries diamond, curved back to LLM box)
+    const loopY = cy - 65;
+    ctx.strokeStyle = c.orange; ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(x5, cy - dh/2);
+    ctx.lineTo(x5, loopY);
+    ctx.lineTo(x2, loopY);
+    ctx.lineTo(x2, cy - bh/2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // Arrowhead at end of loop
+    ctx.fillStyle = c.orange;
+    ctx.beginPath();
+    ctx.moveTo(x2, cy - bh/2);
+    ctx.lineTo(x2 - 5, cy - bh/2 - 8);
+    ctx.lineTo(x2 + 5, cy - bh/2 - 8);
+    ctx.closePath(); ctx.fill();
+    arrowLabel(x5 + 16, cy - dh/2 - 10, 'Yes', c.orange);
+    arrowLabel((x5 + x2) / 2, loopY - 10, 'Feed error back to LLM', c.orange);
+  }})();
+
   function drawBarChart(canvasId, values, color, unit) {{
     const canvas = document.getElementById(canvasId);
     if (!canvas || values.length === 0) return;
