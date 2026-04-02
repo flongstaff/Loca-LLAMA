@@ -93,7 +93,7 @@ def generate_sql_report(
             pct_cls = "score-high" if pct >= 80 else "score-mid" if pct >= 50 else "score-low"
 
             scoreboard_rows += (
-                f'<tr>'
+                f'<tr data-model="{model_short}" data-category="{html.escape(cat)}">'
                 f'<td class="model-name">{model_short}</td>'
                 f'<td class="{pct_cls}"><strong>{total_pass}/{total_q}</strong> ({pct:.0f}%)</td>'
                 f'{diff_cells}'
@@ -120,6 +120,7 @@ def generate_sql_report(
     heatmap_rows = ""
     for model in models:
         model_short = html.escape(model[:35])
+        cat = categorize_model(model, runtime_str)
         cells = ""
         for qid, diff, _ in questions:
             r = next(
@@ -127,13 +128,26 @@ def generate_sql_report(
                 None,
             )
             if r is None:
-                cells += '<td class="cell-na">-</td>'
+                cells += '<td class="cell-na"></td>'
             else:
                 cls = f"cell-{r.status}"
-                label = {"pass": "P", "fail": "F", "error": "E"}.get(r.status, "?")
-                retry_mark = f'<sup>{r.retries}</sup>' if r.retries > 0 else ""
-                cells += f'<td class="{cls}" title="Q{qid}: {r.status}">{label}{retry_mark}</td>'
-        heatmap_rows += f'<tr><td class="model-name">{model_short}</td>{cells}</tr>\n'
+                data_key = html.escape(f"{r.model}_{r.question_id}")
+                cells += f'<td class="{cls}" data-cell="{data_key}"></td>'
+        heatmap_rows += (
+            f'<tr data-model="{model_short}" data-category="{html.escape(cat)}">'
+            f'<td class="model-name">{model_short}</td>{cells}</tr>\n'
+        )
+
+    # ── Pass rate footer ─────────────────────────────────────────────
+    footer_cells = ""
+    for qid, diff, _ in questions:
+        q_results = [r for r in results if r.question_id == qid]
+        total = len(q_results)
+        passed = sum(1 for r in q_results if r.status == "pass")
+        pct = (passed / total * 100) if total else 0
+        pct_cls = "footer-high" if pct >= 80 else "footer-mid" if pct >= 50 else "footer-low"
+        footer_cells += f'<td class="{pct_cls}">{pct:.0f}%</td>'
+    heatmap_footer = f'<tr class="pass-rate-footer"><td class="model-name">pass rate</td>{footer_cells}</tr>'
 
     # ── Per-question detail ─────────────────────────────────────────────
     question_details = ""
@@ -211,11 +225,52 @@ def generate_sql_report(
             "error": sum(1 for r in dr if r.status == "error"),
         })
 
+    # ── Bubble chart data (Pass Rate vs Total Time) ──────────────────
+    bubble_data: list[dict[str, Any]] = []
+    for model in models:
+        mr = [r for r in results if r.model == model]
+        total_pass = sum(1 for r in mr if r.status == "pass")
+        total_q = len(mr)
+        pct = (total_pass / total_q * 100) if total_q else 0
+        total_time_s = sum(r.total_ms for r in mr) / 1000
+        cat = categorize_model(model, runtime_str)
+        bubble_data.append({
+            "model": model[:40],
+            "pass_rate": round(pct, 1),
+            "total_time_s": round(total_time_s, 1),
+            "category": cat,
+            "score": f"{total_pass}/{total_q}",
+        })
+
+    # ── Per-cell data for tooltips ───────────────────────────────────
+    cell_data: dict[str, dict[str, Any]] = {}
+    for r in results:
+        key = f"{r.model}_{r.question_id}"
+        cell_data[key] = {
+            "model": r.model[:40],
+            "qid": r.question_id,
+            "difficulty": r.difficulty,
+            "status": r.status,
+            "tps": round(r.speed_tps, 1),
+            "ttft": round(r.ttft_ms, 0),
+            "total_ms": round(r.total_ms, 0),
+            "retries": r.retries,
+        }
+
+    # ── Unique categories for filter dropdown ────────────────────────
+    unique_categories = []
+    for cat in CATEGORY_ORDER:
+        if cat in grouped_models:
+            unique_categories.append(cat)
+
     chart_data_json = json.dumps({
         "labels": chart_labels,
         "scores": chart_scores,
         "tps": chart_tps,
         "difficulty": diff_breakdown,
+        "bubbles": bubble_data,
+        "cells": cell_data,
+        "categories": unique_categories,
     }).replace("</", r"<\/")
 
     # ── DuckDB-WASM playground data ──────────────────────────────────────
@@ -292,23 +347,75 @@ def generate_sql_report(
   .score-mid {{ color: var(--orange); }}
   .score-low {{ color: var(--red); }}
 
-  /* Heatmap cells */
-  .cell-pass {{
-    background: var(--green-bg); color: var(--green);
-    font-weight: 700; font-size: 0.8rem;
+  /* Heatmap cells — solid colored blocks */
+  .heatmap-table td:not(.model-name) {{
+    width: 30px; min-width: 30px; max-width: 30px; height: 28px;
+    padding: 2px; cursor: pointer; border: 1px solid var(--bg);
   }}
-  .cell-fail {{
-    background: var(--red-bg); color: var(--red);
-    font-weight: 700; font-size: 0.8rem;
+  .cell-pass {{ background: var(--green); }}
+  .cell-fail {{ background: var(--red); }}
+  .cell-error {{ background: var(--orange); }}
+  .cell-na {{ background: var(--surface2); }}
+  .heatmap-table tr:hover td:not(.model-name) {{ opacity: 0.85; }}
+  .heatmap-table tr:hover td.model-name {{ color: var(--accent); }}
+
+  /* Pass rate footer */
+  .pass-rate-footer td {{
+    font-size: 0.7rem; font-weight: 600; color: var(--text-dim);
+    background: var(--surface2) !important; padding: 0.3rem 0.1rem !important;
   }}
-  .cell-error {{
-    background: var(--orange-bg); color: var(--orange);
-    font-weight: 700; font-size: 0.8rem;
+  .pass-rate-footer .model-name {{ font-style: italic; font-weight: 500; }}
+  .footer-high {{ color: var(--green) !important; }}
+  .footer-mid {{ color: var(--orange) !important; }}
+  .footer-low {{ color: var(--red) !important; }}
+
+  /* Tooltip */
+  #tooltip {{
+    display: none; position: fixed; z-index: 1000;
+    background: #1a1d2e; color: #e2e8f0; border: 1px solid #3b4261;
+    border-radius: 8px; padding: 0.75rem 1rem; max-width: 280px;
+    font-size: 0.82rem; line-height: 1.5;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4); pointer-events: none;
   }}
-  .cell-na {{ color: var(--text-dim); }}
-  .cell-pass sup, .cell-fail sup, .cell-error sup {{
-    font-size: 0.6rem; opacity: 0.7;
+  #tooltip .tt-model {{ font-weight: 700; font-size: 0.88rem; margin-bottom: 0.3rem; }}
+  #tooltip .tt-meta {{ color: #8892b0; font-size: 0.78rem; }}
+  #tooltip .tt-pass {{ color: #9ece6a; font-weight: 600; }}
+  #tooltip .tt-fail {{ color: #f7768e; font-weight: 600; }}
+  #tooltip .tt-error {{ color: #ff9e64; font-weight: 600; }}
+  #tooltip .tt-detail {{ color: #7aa2f7; font-size: 0.75rem; margin-top: 0.3rem; }}
+
+  /* Filter bar */
+  .filter-bar {{
+    display: flex; align-items: center; gap: 0.75rem;
+    margin-bottom: 0.75rem; flex-wrap: wrap;
   }}
+  .filter-bar select {{
+    padding: 0.4rem 0.6rem; background: var(--surface);
+    color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; font-size: 0.82rem; min-width: 100px;
+  }}
+  .filter-bar input {{
+    padding: 0.4rem 0.75rem; background: var(--surface);
+    color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; font-size: 0.82rem; min-width: 160px;
+  }}
+  .filter-bar input::placeholder {{ color: var(--text-dim); }}
+  .filter-bar .legend {{ margin-left: auto; }}
+
+  /* Bubble chart */
+  .bubble-section {{ position: relative; }}
+  .bubble-section canvas {{ width: 100% !important; height: 400px; }}
+  .zoom-controls {{
+    position: absolute; top: 10px; right: 10px;
+    display: flex; flex-direction: column; gap: 4px;
+  }}
+  .zoom-controls button {{
+    width: 32px; height: 32px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text); border-radius: 4px;
+    cursor: pointer; font-size: 1.1rem; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }}
+  .zoom-controls button:hover {{ background: var(--surface2); }}
 
   /* Tier badges */
   .tier-trivial {{ color: #7dcfff; }}
@@ -503,16 +610,38 @@ def generate_sql_report(
   </div>
 </div>
 
+<h2>Pass Rate vs Total Time</h2>
+<div class="chart-box bubble-section">
+  <canvas id="bubbleChart"></canvas>
+  <div class="zoom-controls">
+    <button onclick="bubbleZoom(1)" title="Zoom in">+</button>
+    <button onclick="bubbleZoom(-1)" title="Zoom out">&minus;</button>
+  </div>
+</div>
+
 <h2>Question Heatmap</h2>
+<div class="filter-bar">
+  <select id="catFilter" onchange="filterModels()">
+    <option value="">All</option>
+  </select>
+  <input type="text" id="textFilter" placeholder="Filter..." oninput="filterModels()">
+  <div class="legend">
+    <span class="legend-item"><span class="legend-swatch" style="background:var(--green)"></span> Pass</span>
+    <span class="legend-item"><span class="legend-swatch" style="background:var(--red)"></span> Fail</span>
+    <span class="legend-item"><span class="legend-swatch" style="background:var(--orange)"></span> Error</span>
+  </div>
+</div>
 <div class="heatmap-wrapper">
-<table>
+<table class="heatmap-table">
   <thead><tr>
     <th>Model</th>
     {heatmap_header_cells}
   </tr></thead>
   <tbody>{heatmap_rows}</tbody>
+  <tfoot>{heatmap_footer}</tfoot>
 </table>
 </div>
+<div id="tooltip"></div>
 
 <h2>Question Details</h2>
 {question_details}
@@ -805,6 +934,250 @@ def generate_sql_report(
   drawBarChart('scoreChart', data.scores, green, '%');
   drawBarChart('tpsChart', data.tps, accent, '');
   drawStackedBarChart('diffChart', data.difficulty || []);
+
+  // ── Tooltip ──────────────────────────────────────────────────────
+  const tooltip = document.getElementById('tooltip');
+  const cells = data.cells || {{}};
+
+  document.querySelectorAll('.heatmap-table td[data-cell]').forEach(td => {{
+    td.addEventListener('mouseenter', function(e) {{
+      const key = this.getAttribute('data-cell');
+      const c = cells[key];
+      if (!c) return;
+      const statusCls = 'tt-' + c.status;
+      const timeStr = c.total_ms >= 1000
+        ? (c.total_ms / 1000).toFixed(1) + 's'
+        : c.total_ms.toFixed(0) + 'ms';
+      let html = '<div class="tt-model">' + c.model + '</div>';
+      html += '<div class="tt-meta">Q' + c.qid + ' &middot; ' + c.difficulty
+        + ' &middot; <span class="' + statusCls + '">' + c.status + '</span></div>';
+      html += '<div class="tt-meta">' + timeStr + '</div>';
+      if (c.tps > 0) html += '<div class="tt-meta">' + c.tps + ' tok/s</div>';
+      if (c.ttft > 0) html += '<div class="tt-meta">TTFT: ' + c.ttft + 'ms</div>';
+      if (c.retries > 0) html += '<div class="tt-meta">Retries: ' + c.retries + '</div>';
+      html += '<div class="tt-detail">click for details</div>';
+      tooltip.innerHTML = html;
+      tooltip.style.display = 'block';
+      positionTooltip(e);
+    }});
+    td.addEventListener('mousemove', positionTooltip);
+    td.addEventListener('mouseleave', function() {{
+      tooltip.style.display = 'none';
+    }});
+  }});
+
+  function positionTooltip(e) {{
+    const pad = 12;
+    let x = e.clientX + pad;
+    let y = e.clientY + pad;
+    const tw = 280, th = 200;
+    if (x + tw > window.innerWidth) x = e.clientX - tw - pad;
+    if (y + th > window.innerHeight) y = e.clientY - th - pad;
+    tooltip.style.left = x + 'px';
+    tooltip.style.top = y + 'px';
+  }}
+
+  // ── Filter ───────────────────────────────────────────────────────
+  const catSelect = document.getElementById('catFilter');
+  if (catSelect && data.categories) {{
+    data.categories.forEach(c => {{
+      const opt = document.createElement('option');
+      opt.value = c; opt.textContent = c;
+      catSelect.appendChild(opt);
+    }});
+  }}
+
+  function filterModels() {{
+    const cat = (document.getElementById('catFilter') || {{}}).value || '';
+    const text = ((document.getElementById('textFilter') || {{}}).value || '').toLowerCase();
+
+    // Filter heatmap rows
+    document.querySelectorAll('.heatmap-table tbody tr').forEach(tr => {{
+      const model = (tr.getAttribute('data-model') || '').toLowerCase();
+      const rowCat = tr.getAttribute('data-category') || '';
+      const catMatch = !cat || rowCat === cat;
+      const textMatch = !text || model.includes(text);
+      tr.style.display = catMatch && textMatch ? '' : 'none';
+    }});
+
+    // Filter scoreboard rows
+    document.querySelectorAll('table:not(.heatmap-table) tbody tr:not(.category-header)').forEach(tr => {{
+      const model = (tr.getAttribute('data-model') || '').toLowerCase();
+      const rowCat = tr.getAttribute('data-category') || '';
+      if (!model) return;
+      const catMatch = !cat || rowCat === cat;
+      const textMatch = !text || model.includes(text);
+      tr.style.display = catMatch && textMatch ? '' : 'none';
+    }});
+
+    // Show/hide category headers based on visible children
+    document.querySelectorAll('.category-header').forEach(ch => {{
+      let next = ch.nextElementSibling;
+      let hasVisible = false;
+      while (next && !next.classList.contains('category-header')) {{
+        if (next.style.display !== 'none') hasVisible = true;
+        next = next.nextElementSibling;
+      }}
+      ch.style.display = hasVisible ? '' : 'none';
+    }});
+  }}
+  window.filterModels = filterModels;
+
+  // ── Bubble Chart (Pass Rate vs Total Time, log scale) ────────────
+  let bubbleZoomLevel = 0;
+
+  function drawBubbleChart() {{
+    const canvas = document.getElementById('bubbleChart');
+    if (!canvas || !data.bubbles || data.bubbles.length === 0) return;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const W = rect.width, H = 400;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    ctx.scale(dpr, dpr);
+
+    const style = getComputedStyle(document.documentElement);
+    const colors = {{
+      accent: style.getPropertyValue('--accent').trim() || '#7aa2f7',
+      green: style.getPropertyValue('--green').trim() || '#9ece6a',
+      text: style.getPropertyValue('--text').trim() || '#e2e8f0',
+      dim: style.getPropertyValue('--text-dim').trim() || '#8892b0',
+      border: style.getPropertyValue('--border').trim() || '#2d3154',
+      surface: style.getPropertyValue('--surface').trim() || '#1a1d2e',
+    }};
+
+    const pad = {{ top: 30, right: 40, bottom: 50, left: 70 }};
+    const plotW = W - pad.left - pad.right;
+    const plotH = H - pad.top - pad.bottom;
+
+    // Data ranges with zoom
+    const times = data.bubbles.map(b => b.total_time_s).filter(t => t > 0);
+    const zoomFactor = Math.pow(0.7, bubbleZoomLevel);
+    let minT = Math.max(1, Math.min(...times) * 0.8);
+    let maxT = Math.max(...times) * 1.2;
+    const midT = Math.sqrt(minT * maxT);
+    minT = midT / Math.pow(midT / minT, zoomFactor);
+    maxT = midT * Math.pow(maxT / midT, zoomFactor);
+    const logMin = Math.log10(minT), logMax = Math.log10(maxT);
+
+    // Clear
+    ctx.clearRect(0, 0, W, H);
+
+    // Grid lines (dashed)
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = colors.border;
+    ctx.lineWidth = 0.5;
+
+    // Y grid (every 10%)
+    for (let pct = 0; pct <= 100; pct += 10) {{
+      const y = pad.top + plotH - (pct / 100) * plotH;
+      ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + plotW, y); ctx.stroke();
+    }}
+
+    // X grid (log ticks)
+    const logTicks = [];
+    const startPow = Math.floor(logMin);
+    const endPow = Math.ceil(logMax);
+    for (let p = startPow; p <= endPow; p++) {{
+      for (const m of [1, 2, 5]) {{
+        const v = m * Math.pow(10, p);
+        if (v >= minT && v <= maxT) logTicks.push(v);
+      }}
+    }}
+    logTicks.forEach(v => {{
+      const x = pad.left + ((Math.log10(v) - logMin) / (logMax - logMin)) * plotW;
+      ctx.beginPath(); ctx.moveTo(x, pad.top); ctx.lineTo(x, pad.top + plotH); ctx.stroke();
+    }});
+    ctx.setLineDash([]);
+
+    // Axes
+    ctx.strokeStyle = colors.border; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(pad.left, pad.top);
+    ctx.lineTo(pad.left, pad.top + plotH);
+    ctx.lineTo(pad.left + plotW, pad.top + plotH);
+    ctx.stroke();
+
+    // Y-axis labels
+    ctx.fillStyle = colors.dim; ctx.font = '11px -apple-system, sans-serif';
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    for (let pct = 0; pct <= 100; pct += 25) {{
+      const y = pad.top + plotH - (pct / 100) * plotH;
+      ctx.fillText(pct + '%', pad.left - 8, y);
+    }}
+
+    // X-axis labels
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    logTicks.forEach(v => {{
+      const x = pad.left + ((Math.log10(v) - logMin) / (logMax - logMin)) * plotW;
+      const label = v >= 1000 ? (v/1000).toFixed(0) + 'ks' : v.toFixed(0) + 's';
+      ctx.fillText(label, x, pad.top + plotH + 8);
+    }});
+
+    // Axis titles
+    ctx.fillStyle = colors.dim; ctx.font = '12px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Total Time (seconds, log scale)', pad.left + plotW / 2, H - 8);
+    ctx.save();
+    ctx.translate(16, pad.top + plotH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText('Pass Rate (%)', 0, 0);
+    ctx.restore();
+
+    // Bubbles
+    const maxBubbleR = 24, minBubbleR = 6;
+    const scores = data.bubbles.map(b => {{
+      const parts = b.score.split('/');
+      return parseInt(parts[0]) + parseInt(parts[1]);
+    }});
+    const maxScore = Math.max(...scores), minScore = Math.min(...scores);
+
+    data.bubbles.forEach((b, i) => {{
+      if (b.total_time_s <= 0) return;
+      const logT = Math.log10(b.total_time_s);
+      const x = pad.left + ((logT - logMin) / (logMax - logMin)) * plotW;
+      const y = pad.top + plotH - (b.pass_rate / 100) * plotH;
+
+      // Clamp to plot area
+      if (x < pad.left || x > pad.left + plotW || y < pad.top || y > pad.top + plotH) return;
+
+      const scoreVal = scores[i];
+      const r = maxScore === minScore ? 12
+        : minBubbleR + ((scoreVal - minScore) / (maxScore - minScore)) * (maxBubbleR - minBubbleR);
+
+      // Color by category
+      const isLocal = b.category.toLowerCase().includes('local')
+        || b.category.toLowerCase().includes('gguf');
+      const color = isLocal ? colors.green : colors.accent;
+
+      ctx.globalAlpha = 0.6;
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = color; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+
+      // Label
+      ctx.fillStyle = colors.text; ctx.font = '10px -apple-system, sans-serif';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+      ctx.fillText(b.model, x + r + 4, y - 2);
+    }});
+  }}
+
+  drawBubbleChart();
+
+  function bubbleZoom(dir) {{
+    bubbleZoomLevel += dir;
+    bubbleZoomLevel = Math.max(-3, Math.min(5, bubbleZoomLevel));
+    drawBubbleChart();
+  }}
+  window.bubbleZoom = bubbleZoom;
+
+  // Redraw on resize
+  window.addEventListener('resize', function() {{
+    drawBubbleChart();
+  }});
 }})();
 </script>
 

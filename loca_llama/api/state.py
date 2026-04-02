@@ -8,89 +8,80 @@ from dataclasses import dataclass, field
 
 from loca_llama.benchmark import BenchmarkResult
 from loca_llama.memory_monitor import MemoryMonitor
+from loca_llama.types import JobStatus
 
 
 @dataclass
-class BenchmarkJob:
-    """Tracks a running or completed benchmark."""
+class BaseJob:
+    """Common fields shared by all job types."""
 
     job_id: str
-    status: str  # "running", "complete", "error"
-    runtime_name: str
-    model_id: str
-    num_runs: int
-    current_run: int = 0
-    results: list[BenchmarkResult] = field(default_factory=list)
-    aggregate: dict = field(default_factory=dict)
+    status: JobStatus
     error: str | None = None
     task: asyncio.Task | None = None
 
 
 @dataclass
-class SweepJob:
+class BenchmarkJob(BaseJob):
+    """Tracks a running or completed benchmark."""
+
+    runtime_name: str = ""
+    model_id: str = ""
+    num_runs: int = 0
+    current_run: int = 0
+    results: list[BenchmarkResult] = field(default_factory=list)
+    aggregate: dict = field(default_factory=dict)
+
+
+@dataclass
+class SweepJob(BaseJob):
     """Tracks a running or completed sweep benchmark across multiple models."""
 
-    job_id: str
-    status: str  # "running", "complete", "error"
-    runtime_name: str
-    model_ids: list[str]
-    num_runs: int
+    runtime_name: str = ""
+    model_ids: list[str] = field(default_factory=list)
+    num_runs: int = 0
     current_combo: int = 0
     total_combos: int = 0
     current_run_in_combo: int = 0
     combo_results: list[dict] = field(default_factory=list)
-    error: str | None = None
-    task: asyncio.Task | None = None
 
 
 @dataclass
-class ThroughputJob:
+class ThroughputJob(BaseJob):
     """Tracks a running or completed throughput test."""
 
-    job_id: str
-    status: str  # "running", "complete", "error"
-    runtime_name: str
-    model_id: str
-    concurrency: int
-    total_requests: int
+    runtime_name: str = ""
+    model_id: str = ""
+    concurrency: int = 0
+    total_requests: int = 0
     completed_requests: int = 0
     result: dict = field(default_factory=dict)
-    error: str | None = None
-    task: asyncio.Task | None = None
 
 
 @dataclass
-class CompareJob:
+class CompareJob(BaseJob):
     """Tracks a running or completed runtime comparison."""
 
-    job_id: str
-    status: str  # "running", "complete", "error"
-    runtime_a: str
-    runtime_b: str
-    model_id: str
-    num_runs: int
+    runtime_a: str = ""
+    runtime_b: str = ""
+    model_id: str = ""
+    num_runs: int = 0
     results: list[dict] = field(default_factory=list)
     speedup_pct: float | None = None
     faster_runtime: str | None = None
-    error: str | None = None
-    task: asyncio.Task | None = None
 
 
 @dataclass
-class SqlBenchJob:
+class SqlBenchJob(BaseJob):
     """Tracks a running or completed SQL benchmark."""
 
-    job_id: str
-    status: str  # "running", "complete", "error"
-    runtime_name: str
-    model_ids: list[str]
+    runtime_name: str = ""
+    model_ids: list[str] = field(default_factory=list)
     current_model: int = 0
     total_models: int = 0
     current_question: int = 0
     total_questions: int = 0
     results: list[dict] = field(default_factory=list)
-    error: str | None = None
-    task: asyncio.Task | None = None
 
 
 MAX_ACTIVE_JOBS = 3

@@ -15,6 +15,8 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any
 
+from .types import BenchmarkType
+
 
 RESULTS_DIR = Path.home() / ".loca-llama" / "results"
 
@@ -84,7 +86,7 @@ def detect_hardware_string() -> str:
 class BenchmarkRecord:
     """A single benchmark result record."""
 
-    type: str  # "speed", "quality", "monitor", "eval", "sql", "throughput"
+    type: BenchmarkType
     model: str
     runtime: str  # "lm-studio", "omlx", "llama.cpp-server", "openrouter", etc.
     timestamp: float = field(default_factory=time.time)

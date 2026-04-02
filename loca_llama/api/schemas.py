@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from loca_llama.types import Difficulty, JobStatus, SQLResultStatus
+
 
 # ── Hardware ─────────────────────────────────────────────────────────────────
 
@@ -49,16 +51,7 @@ class ModelResponse(BaseModel):
     license: str
 
 
-class ModelDetailResponse(BaseModel):
-    name: str
-    family: str
-    params_billion: float
-    default_context_length: int
-    max_context_length: int
-    num_layers: int
-    num_kv_heads: int
-    head_dim: int
-    license: str
+ModelDetailResponse = ModelResponse
 
 
 class ModelListResponse(BaseModel):
@@ -396,7 +389,7 @@ class BenchmarkStartRequest(BaseModel):
 
 class BenchmarkStartResponse(BaseModel):
     job_id: str
-    status: str
+    status: JobStatus
 
 
 class BenchmarkProgress(BaseModel):
@@ -431,7 +424,7 @@ class BenchmarkAggregate(BaseModel):
 
 class BenchmarkStatusResponse(BaseModel):
     job_id: str
-    status: str
+    status: JobStatus
     progress: BenchmarkProgress | None = None
     runs: list[BenchmarkRunResult] | None = None
     aggregate: BenchmarkAggregate | None = None
@@ -469,7 +462,7 @@ class SweepProgress(BaseModel):
 
 class SweepStatusResponse(BaseModel):
     job_id: str
-    status: str
+    status: JobStatus
     progress: SweepProgress | None = None
     combo_results: list[SweepComboResult] | None = None
     error: str | None = None
@@ -502,7 +495,7 @@ class ThroughputStartRequest(BaseModel):
 
 class ThroughputResponse(BaseModel):
     job_id: str
-    status: str
+    status: JobStatus
     concurrency: int = 0
     total_requests: int = 0
     successful_requests: int = 0
@@ -538,7 +531,7 @@ class CompareResult(BaseModel):
 
 class CompareResponse(BaseModel):
     job_id: str
-    status: str
+    status: JobStatus
     results: list[CompareResult] | None = None
     speedup_pct: float | None = None
     faster_runtime: str | None = None
@@ -583,25 +576,16 @@ class MemoryReportResponse(BaseModel):
 class SqlBenchStartRequest(BaseModel):
     runtime_name: str
     model_ids: list[str] = Field(..., min_length=1, max_length=10)
-    difficulties: list[str] | None = None
+    difficulties: list[Difficulty] | None = None
     max_retries: int = Field(default=2, ge=0, le=5)
 
-    @field_validator("difficulties")
-    @classmethod
-    def validate_difficulties(cls, v: list[str] | None) -> list[str] | None:
-        if v is not None:
-            valid = {"trivial", "easy", "medium", "hard"}
-            for d in v:
-                if d.lower() not in valid:
-                    raise ValueError(f"Invalid difficulty: {d}. Must be one of {valid}")
-        return v
 
 
 class SqlBenchQuestionResult(BaseModel):
     question_id: int
     question: str
-    difficulty: str
-    status: str  # "pass", "fail", "error"
+    difficulty: Difficulty
+    status: SQLResultStatus
     generated_sql: str = ""
     error_message: str = ""
     speed_tps: float = 0.0
@@ -630,7 +614,7 @@ class SqlBenchProgress(BaseModel):
 
 class SqlBenchStatusResponse(BaseModel):
     job_id: str
-    status: str
+    status: JobStatus
     progress: SqlBenchProgress | None = None
     model_results: list[SqlBenchModelResult] | None = None
     error: str | None = None

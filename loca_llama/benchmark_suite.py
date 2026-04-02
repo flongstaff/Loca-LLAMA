@@ -55,7 +55,7 @@ class BenchmarkConfig:
 
 
 @dataclass
-class BenchmarkResult:
+class SuiteBenchmarkResult:
     """Result of a single benchmark run."""
 
     # Configuration
@@ -98,10 +98,10 @@ class BenchmarkSweepResult:
     # Sweep parameters
     parameter_name: str  # "batch_size", "context_length", "gpu_layers"
     parameter_values: list
-    results: list[BenchmarkResult]
+    results: list[SuiteBenchmarkResult]
 
     # Aggregations
-    best_result: BenchmarkResult | None = None
+    best_result: SuiteBenchmarkResult | None = None
     avg_throughput: float | None = None
     best_throughput: float | None = None
     min_throughput: float | None = None
@@ -238,7 +238,7 @@ def parse_llama_timings(output: str) -> dict:
     return timings
 
 
-def run_benchmark(config: BenchmarkConfig, prompt: str | None = None) -> BenchmarkResult:
+def run_benchmark(config: BenchmarkConfig, prompt: str | None = None) -> SuiteBenchmarkResult:
     """Run a single benchmark test."""
     if not prompt:
         prompt = "Write a detailed explanation of how neural networks learn through backpropagation."
@@ -249,7 +249,7 @@ def run_benchmark(config: BenchmarkConfig, prompt: str | None = None) -> Benchma
     # Start server
     proc = run_server(config)
     if not proc:
-        return BenchmarkResult(
+        return SuiteBenchmarkResult(
             config_hash=config_hash,
             model_name=model_name,
             gpu_layers=config.gpu_layers,
@@ -276,7 +276,7 @@ def run_benchmark(config: BenchmarkConfig, prompt: str | None = None) -> Benchma
         )
 
         if not success or not response:
-            return BenchmarkResult(
+            return SuiteBenchmarkResult(
                 config_hash=config_hash,
                 model_name=model_name,
                 gpu_layers=config.gpu_layers,
@@ -324,7 +324,7 @@ def run_benchmark(config: BenchmarkConfig, prompt: str | None = None) -> Benchma
         prompt_tok_s = (prompt_tokens / prompt_eval_ms * 1000) if prompt_eval_ms > 0 else 0
         gen_tok_s = tok_s
 
-        return BenchmarkResult(
+        return SuiteBenchmarkResult(
             config_hash=config_hash,
             model_name=model_name,
             gpu_layers=config.gpu_layers,
