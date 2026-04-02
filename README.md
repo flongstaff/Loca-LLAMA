@@ -1,8 +1,8 @@
 # Loca-LLAMA
 
-**Local LLM Apple Mac Analyzer** — Find out which LLMs your Mac can run locally, how fast, and at what quality.
+**Local LLM Apple Mac Analyzer** — Find out which LLMs your Mac can actually run, how fast they'll go, and how good they really are.
 
-Loca-LLAMA analyzes your Apple Silicon Mac's specs (memory, bandwidth, GPU) and tells you exactly which LLM models fit, at which quantization levels, with what context length, and how fast they'll generate tokens.
+Running LLMs locally on Apple Silicon means juggling memory limits, quantization trade-offs, and runtime differences — with no easy way to know what fits or performs well on *your* hardware. Loca-LLAMA solves this: it reads your Mac's specs, maps them against 50+ models and 13 quantization formats, and gives you concrete answers — what fits, how fast, and at what quality. Then it lets you benchmark everything end-to-end with speed tests, coding challenges, SQL generation, and standard evals, all combined into a single HTML scorecard you can share.
 
 ## Features
 
@@ -130,9 +130,6 @@ loca-llama batch-optimize --model "Qwen 2.5 32B" --preference high  # Max throug
 ### Run benchmarks
 
 ```bash
-# Legacy: benchmark with model file
-loca-llama benchmark --model "Llama 3.1 8B" --model-path /path/to/model.gguf
-
 # Speed benchmark (against running LM Studio, oMLX, or llama.cpp server)
 loca-llama speed                             # Auto-detect runtime + model
 loca-llama speed --sweep                     # Benchmark all loaded models
@@ -254,13 +251,27 @@ With 48GB unified memory (~44GB usable), you could run:
 | Llama 3.1 8B       | Q8_0    | ~8 GB  | ~32 tok/s  | ~128K       |
 | Phi-4 14B           | Q6_K    | ~11 GB | ~24 tok/s  | ~16K        |
 
-## License
+## Acknowledgments & Inspirations
 
-MIT
+Loca-LLAMA's benchmark suite draws from several excellent open-source projects and community efforts:
 
----
+- **[sql-benchmark.nicklothian.com](https://sql-benchmark.nicklothian.com/)** — The SQL generation benchmark design, heatmap report style, and agentic retry-loop approach are directly inspired by Nick Lothian's SQL benchmark for LLMs. The question format (schema + natural language → SQL → execute → verify) and difficulty-tiered scoring follow the same philosophy.
+- **[Open LLM Leaderboard](https://huggingface.co/spaces/open-llm-leaderboard/open_llm_leaderboard)** (HuggingFace) — The evaluation benchmark selection (GSM8K, ARC-Challenge, HellaSwag, MMLU) follows the leaderboard's standard eval suite, adapted for local inference with smaller sample sizes.
+- **[GSM8K](https://github.com/openai/grade-school-math)** (OpenAI) — Grade school math reasoning benchmark.
+- **[ARC-Challenge](https://allenai.org/data/arc)** (Allen AI) — Science reasoning multiple-choice benchmark.
+- **[HellaSwag](https://rowanzellers.com/hellaswag/)** (Rowan Zellers et al.) — Commonsense reasoning completion benchmark.
+- **[HumanEval](https://github.com/openai/human-eval)** (OpenAI) — Python code generation benchmark.
+- **[IFEval](https://arxiv.org/abs/2311.07911)** (Google) — Instruction-following evaluation with verifiable constraints.
+- **[MMLU](https://github.com/hendrycks/test)** (Dan Hendrycks et al.) — Massive multitask language understanding benchmark.
+- **[lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness)** (EleutherAI) — Reference implementation for running standard LLM evals; informed our benchmark runner design.
+
+The unified report's weighted scorecard approach (combining speed, quality, eval, SQL, and throughput metrics) is original to this project.
 
 ## Documentation
 
 - **[Testing Guide](docs/TESTING.md)** — How to run and contribute tests
 - **[Contributing](CONTRIBUTING.md)** — Development setup and contribution guidelines
+
+## License
+
+MIT
