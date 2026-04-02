@@ -179,10 +179,22 @@ def generate_sql_report(
         tps_vals = [r.speed_tps for r in mr if r.speed_tps > 0]
         chart_tps.append(sum(tps_vals) / len(tps_vals) if tps_vals else 0)
 
+    # ── Difficulty breakdown data (aggregate across all models) ─────────
+    diff_breakdown: list[dict[str, Any]] = []
+    for d in difficulties:
+        dr = [r for r in results if r.difficulty == d]
+        diff_breakdown.append({
+            "label": d.capitalize(),
+            "pass": sum(1 for r in dr if r.status == "pass"),
+            "fail": sum(1 for r in dr if r.status == "fail"),
+            "error": sum(1 for r in dr if r.status == "error"),
+        })
+
     chart_data_json = json.dumps({
         "labels": chart_labels,
         "scores": chart_scores,
         "tps": chart_tps,
+        "difficulty": diff_breakdown,
     }).replace("</", r"<\/")
 
     return f"""<!DOCTYPE html>
@@ -280,6 +292,10 @@ def generate_sql_report(
 
   /* Charts */
   .charts {{ display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 1.5rem 0; }}
+  .charts .chart-box.full-width {{ grid-column: 1 / -1; }}
+  .legend {{ display: flex; gap: 1.2rem; margin-top: 0.5rem; font-size: 0.78rem; color: var(--text-dim); }}
+  .legend-item {{ display: flex; align-items: center; gap: 0.3rem; }}
+  .legend-swatch {{ width: 12px; height: 12px; border-radius: 2px; }}
   .chart-box {{
     background: var(--surface); border-radius: 8px; padding: 1rem;
     border: 1px solid var(--border);
@@ -362,6 +378,10 @@ def generate_sql_report(
 
   /* Heatmap scroll */
   .heatmap-wrapper {{ overflow-x: auto; }}
+
+  /* Flowchart */
+  .flow-section {{ margin: 1.5rem 0; }}
+  .flow-section canvas {{ width: 100% !important; height: 280px; background: var(--surface); border-radius: 8px; border: 1px solid var(--border); }}
 </style>
 </head>
 <body>
@@ -375,6 +395,11 @@ def generate_sql_report(
     <span>Models: {len(models)}</span>
     {f'<span>Date: {html.escape(timestamp)}</span>' if timestamp else ''}
   </div>
+</div>
+
+<h2>Evaluation Flow</h2>
+<div class="flow-section">
+  <canvas id="flowChart"></canvas>
 </div>
 
 <h2>Scoreboard</h2>
@@ -395,6 +420,15 @@ def generate_sql_report(
   <div class="chart-box">
     <h3>Average Speed (tok/s)</h3>
     <canvas id="tpsChart"></canvas>
+  </div>
+  <div class="chart-box full-width">
+    <h3>Results by Difficulty Tier</h3>
+    <canvas id="diffChart"></canvas>
+    <div class="legend">
+      <span class="legend-item"><span class="legend-swatch" style="background:var(--green)"></span> Pass</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:var(--red)"></span> Fail</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:var(--orange)"></span> Error</span>
+    </div>
   </div>
 </div>
 
@@ -488,10 +522,76 @@ def generate_sql_report(
     }}
   }}
 
+  function drawStackedBarChart(canvasId, items) {{
+    const canvas = document.getElementById(canvasId);
+    if (!canvas || items.length === 0) return;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = 200 * dpr;
+    ctx.scale(dpr, dpr);
+    const W = rect.width, H = 200;
+    const pad = {{ top: 20, right: 20, bottom: 40, left: 50 }};
+    const plotW = W - pad.left - pad.right;
+    const plotH = H - pad.top - pad.bottom;
+    const style = getComputedStyle(document.documentElement);
+    const colors = {{
+      pass: style.getPropertyValue('--green').trim() || '#9ece6a',
+      fail: style.getPropertyValue('--red').trim() || '#f7768e',
+      error: style.getPropertyValue('--orange').trim() || '#ff9e64'
+    }};
+    const maxVal = Math.max(...items.map(d => d.pass + d.fail + d.error)) * 1.15 || 1;
+    const gap = plotW / items.length;
+    const barW = Math.min(gap * 0.5, 80);
+
+    items.forEach((item, i) => {{
+      const x = pad.left + i * gap + (gap - barW) / 2;
+      let y = pad.top + plotH;
+      ['pass', 'fail', 'error'].forEach(key => {{
+        const h = (item[key] / maxVal) * plotH;
+        if (h > 0) {{
+          y -= h;
+          ctx.fillStyle = colors[key];
+          ctx.beginPath();
+          ctx.roundRect(x, y, barW, h, key === 'error' || key === 'fail' ? [0,0,0,0] : [4,4,0,0]);
+          ctx.fill();
+        }}
+      }});
+      // Total label
+      const total = item.pass + item.fail + item.error;
+      ctx.fillStyle = style.getPropertyValue('--text').trim() || '#e2e8f0';
+      ctx.font = '11px -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(total.toString(), x + barW / 2, y - 5);
+      // X label
+      ctx.fillStyle = style.getPropertyValue('--text-dim').trim() || '#8892b0';
+      ctx.font = '11px -apple-system, sans-serif';
+      ctx.fillText(item.label, x + barW / 2, H - pad.bottom + 14);
+    }});
+
+    // Y axis
+    ctx.strokeStyle = style.getPropertyValue('--border').trim() || '#2d3154';
+    ctx.beginPath();
+    ctx.moveTo(pad.left, pad.top);
+    ctx.lineTo(pad.left, pad.top + plotH);
+    ctx.lineTo(pad.left + plotW, pad.top + plotH);
+    ctx.stroke();
+    ctx.fillStyle = style.getPropertyValue('--text-dim').trim() || '#8892b0';
+    ctx.font = '10px -apple-system, sans-serif';
+    ctx.textAlign = 'right';
+    for (let i = 0; i <= 4; i++) {{
+      const v = (maxVal / 4) * i;
+      const yp = pad.top + plotH - (v / maxVal) * plotH;
+      ctx.fillText(v.toFixed(0), pad.left - 6, yp + 3);
+    }}
+  }}
+
   const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#7aa2f7';
   const green = getComputedStyle(document.documentElement).getPropertyValue('--green').trim() || '#9ece6a';
   drawBarChart('scoreChart', data.scores, green, '%');
   drawBarChart('tpsChart', data.tps, accent, '');
+  drawStackedBarChart('diffChart', data.difficulty || []);
 }})();
 </script>
 </body>
