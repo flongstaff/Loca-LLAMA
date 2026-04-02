@@ -19,11 +19,12 @@ python -m pytest tests/ -v                    # Tests
 ```
 
 ## Architecture
-- Core modules (analyzer, hardware, models, quantization, runtime, scanner, hub, benchmark, templates, memory_monitor) are shared across all interfaces
+- Core modules (analyzer, hardware, models, quantization, runtime, scanner, hub, templates, memory_monitor) are shared across all interfaces
 - API routes (`loca_llama/api/routes/`) import core modules and return JSON
 - CLI/TUI unchanged — backward compatible
 - Benchmarks use background tasks (non-blocking)
 - Memory monitor uses FastAPI lifespan for lifecycle
+- **Benchmark suite:** benchmark.py (speed + percentiles), quality_bench.py (10 tasks), eval_benchmarks.py (6 standard evals), sql_bench.py (25 SQL questions), throughput.py (concurrent + ramp), unified_report.py (mega-report), benchmark_results.py (storage + hardware detection)
 
 ## Conventions
 - All business logic in core modules, not in routes
