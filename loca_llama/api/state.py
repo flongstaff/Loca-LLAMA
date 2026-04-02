@@ -118,6 +118,7 @@ class AppState:
     def create_benchmark_job(
         self, runtime_name: str, model_id: str, num_runs: int
     ) -> BenchmarkJob:
+        self.cleanup_old_jobs()
         job_id = str(uuid.uuid4())
         job = BenchmarkJob(
             job_id=job_id,
@@ -132,6 +133,7 @@ class AppState:
     def create_sweep_job(
         self, runtime_name: str, model_ids: list[str], num_runs: int
     ) -> SweepJob:
+        self.cleanup_old_jobs()
         job_id = str(uuid.uuid4())
         job = SweepJob(
             job_id=job_id,
@@ -147,6 +149,7 @@ class AppState:
     def create_throughput_job(
         self, runtime_name: str, model_id: str, concurrency: int, total_requests: int
     ) -> ThroughputJob:
+        self.cleanup_old_jobs()
         job_id = str(uuid.uuid4())
         job = ThroughputJob(
             job_id=job_id,
@@ -162,6 +165,7 @@ class AppState:
     def create_compare_job(
         self, runtime_a: str, runtime_b: str, model_id: str, num_runs: int
     ) -> CompareJob:
+        self.cleanup_old_jobs()
         job_id = str(uuid.uuid4())
         job = CompareJob(
             job_id=job_id,
@@ -177,6 +181,7 @@ class AppState:
     def create_sql_bench_job(
         self, runtime_name: str, model_ids: list[str], total_questions: int
     ) -> SqlBenchJob:
+        self.cleanup_old_jobs()
         job_id = str(uuid.uuid4())
         job = SqlBenchJob(
             job_id=job_id,
@@ -200,5 +205,8 @@ class AppState:
             if len(completed) > max_jobs:
                 for k, job in completed[: len(completed) - max_jobs]:
                     if job.task and not job.task.done():
-                        job.task.cancel()
+                        try:
+                            job.task.cancel()
+                        except Exception:
+                            pass
                     del job_dict[k]

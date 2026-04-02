@@ -63,9 +63,6 @@ def search_huggingface(
         req = urllib.request.Request(url, headers={"User-Agent": "loca-llama/0.1"})
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode())
-    except urllib.error.URLError as e:
-        logger.warning("HuggingFace search network error: %s", e)
-        return []
     except (json.JSONDecodeError, ValueError) as e:
         logger.warning("HuggingFace search data error: %s", e)
         return []
@@ -112,9 +109,6 @@ def get_model_files(repo_id: str) -> list[dict]:
         req = urllib.request.Request(url, headers={"User-Agent": "loca-llama/0.1"})
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode())
-    except urllib.error.URLError as e:
-        logger.warning("HuggingFace files network error for %s: %s", repo_id, e)
-        return []
     except (json.JSONDecodeError, ValueError) as e:
         logger.warning("HuggingFace files data error for %s: %s", repo_id, e)
         return []

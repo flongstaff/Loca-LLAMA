@@ -6,6 +6,7 @@ memory gives us a complete picture of VRAM usage during inference.
 Uses only stdlib — no psutil or external dependencies required.
 """
 
+import collections
 import logging
 import subprocess
 import sys
@@ -221,7 +222,7 @@ class MemoryMonitor:
 
     def __init__(self, interval: float = 0.5):
         self.interval = interval
-        self._samples: list[MemorySample] = []
+        self._samples: collections.deque[MemorySample] = collections.deque(maxlen=3600)
         self._lock = threading.Lock()
         self._running = False
         self._thread: threading.Thread | None = None
@@ -231,7 +232,7 @@ class MemoryMonitor:
     def start(self) -> None:
         """Start monitoring in background thread."""
         with self._lock:
-            self._samples = []
+            self._samples = collections.deque(maxlen=3600)
         self._running = True
         self._start_time = time.monotonic()
 
@@ -267,7 +268,8 @@ class MemoryMonitor:
     def get_history(self, limit: int = 60) -> list[MemorySample]:
         """Return recent samples as a snapshot."""
         with self._lock:
-            return list(self._samples[-limit:])
+            samples = list(self._samples)
+            return samples[-limit:]
 
     def get_report(self) -> MemoryReport:
         """Return aggregate memory report since monitor start."""

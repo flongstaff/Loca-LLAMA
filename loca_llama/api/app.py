@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -29,8 +30,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         yield
     finally:
+        logger.info("Cancelling running jobs")
+        for jobs in (
+            state.benchmark_jobs,
+            state.sweep_jobs,
+            state.throughput_jobs,
+            state.compare_jobs,
+            state.sql_bench_jobs,
+        ):
+            for job in jobs.values():
+                if job.task and not job.task.done():
+                    job.task.cancel()
         logger.info("Stopping MemoryMonitor")
-        state.memory_monitor.stop()
+        await asyncio.to_thread(state.memory_monitor.stop)
 
 
 def create_app() -> FastAPI:

@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-import subprocess
 import sys
 import time
 import urllib.error
@@ -787,6 +786,7 @@ def run_mmlu(
 
     total_correct = 0
     total_questions = 0
+    total_errors = 0
 
     for subject in MMLU_SUBJECTS:
         data = _download_hf_rows(
@@ -831,14 +831,18 @@ def run_mmlu(
                     total_correct += 1
 
             except Exception:
-                total_questions += 1
+                total_errors += 1
 
         subj_label = subject.replace("_", " ")
         print(f"    MMLU/{subj_label}: done", flush=True)
 
     score = total_correct / total_questions if total_questions > 0 else 0
     print(f"  MMLU ({len(MMLU_SUBJECTS)} subjects): {total_correct}/{total_questions} = {score:.1%}")
-    return {"score": score, "correct": total_correct, "total": total_questions}
+    return {
+        "score": score, "correct": total_correct, "total": total_questions,
+        "errors": total_errors,
+        "error_rate": total_errors / (total_questions + total_errors) if (total_questions + total_errors) > 0 else 0,
+    }
 
 
 # =============================================================================

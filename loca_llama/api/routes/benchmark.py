@@ -530,6 +530,7 @@ async def _run_benchmark_background(
         job.status = "error"
         job.error = "Benchmark run failed — check server logs for details"
     finally:
+        job.task = None
         state.cleanup_old_jobs()
 
 
@@ -572,6 +573,7 @@ async def _run_sweep_background(
         job.status = "error"
         job.error = "Sweep run failed — check server logs for details"
     finally:
+        job.task = None
         state.cleanup_old_jobs()
 
 
@@ -584,6 +586,11 @@ async def start_throughput(
     state: AppState = Depends(get_state),
 ) -> BenchmarkStartResponse:
     """Start a concurrent throughput test as a background task."""
+    if state.active_job_count() >= MAX_ACTIVE_JOBS:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many active jobs ({MAX_ACTIVE_JOBS} max). Wait for current jobs to complete.",
+        )
     try:
         runtimes = await asyncio.to_thread(detect_all_runtimes)
     except Exception:
@@ -693,6 +700,7 @@ async def _run_throughput_background(
         job.status = "error"
         job.error = "Throughput test failed — check server logs"
     finally:
+        job.task = None
         state.cleanup_old_jobs()
 
 
@@ -841,6 +849,7 @@ async def _run_compare_background(
         job.status = "error"
         job.error = "Runtime comparison failed — check server logs"
     finally:
+        job.task = None
         state.cleanup_old_jobs()
 
 
@@ -914,6 +923,7 @@ async def start_sql_benchmark(
             job.status = "error"
             job.error = "SQL benchmark failed — check server logs"
         finally:
+            job.task = None
             state.cleanup_old_jobs()
 
     job.task = asyncio.create_task(_run())

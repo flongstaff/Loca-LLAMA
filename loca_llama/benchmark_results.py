@@ -133,6 +133,7 @@ class BenchmarkRecord:
 
 def _ensure_dir() -> Path:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    RESULTS_DIR.chmod(0o700)
     return RESULTS_DIR
 
 
