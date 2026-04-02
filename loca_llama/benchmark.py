@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import csv
 import json
+import logging
 import os
 import re
 import shutil
@@ -16,6 +16,8 @@ from collections.abc import Generator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -98,11 +100,11 @@ def detect_litellm() -> RuntimeInfo | None:
                     with urllib.request.urlopen(f"{url}/v1/models", timeout=2) as r:
                         mdata = json.loads(r.read().decode())
                         models = [m["id"] for m in mdata.get("data", [])]
-                except Exception:
-                    pass
+                except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError, TimeoutError, KeyError) as e:
+                    logger.debug("detect_litellm: failed to list models: %s", e)
                 return RuntimeInfo(name="litellm-proxy", url=url, models=models, api_key="sk-local")
-    except Exception:
-        pass
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError, TimeoutError) as e:
+        logger.debug("detect_litellm: health check failed: %s", e)
     return None
 
 
@@ -123,11 +125,11 @@ def detect_omlx() -> RuntimeInfo | None:
                     with urllib.request.urlopen(req, timeout=2) as r:
                         mdata = json.loads(r.read().decode())
                         models = [m["id"] for m in mdata.get("data", [])]
-                except Exception:
-                    models = ["(omlx model)"]
+                except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError, TimeoutError, KeyError) as e:
+                    logger.debug("detect_omlx: failed to list models: %s", e)
                 return RuntimeInfo(name="omlx", url=url, models=models, api_key=api_key)
-    except Exception:
-        pass
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError, TimeoutError) as e:
+        logger.debug("detect_omlx: health check failed: %s", e)
     return None
 
 
@@ -144,10 +146,12 @@ def detect_llama_cpp_server() -> RuntimeInfo | None:
                         with urllib.request.urlopen(f"{url}/v1/models", timeout=2) as r:
                             mdata = json.loads(r.read().decode())
                             models = [m["id"] for m in mdata.get("data", [])]
-                    except Exception:
+                    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError, TimeoutError, KeyError) as e:
+                        logger.debug("detect_llama_cpp_server: failed to list models on %s: %s", url, e)
                         models = ["(loaded model)"]
                     return RuntimeInfo(name="llama.cpp-server", url=url, models=models)
-        except Exception:
+        except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError, TimeoutError) as e:
+            logger.debug("detect_llama_cpp_server: health check failed on %s: %s", url, e)
             continue
     return None
 
@@ -162,7 +166,8 @@ def detect_lm_studio() -> RuntimeInfo | None:
                 models = [m["id"] for m in data.get("data", [])]
                 if models:
                     return RuntimeInfo(name="lm-studio", url=url, models=models)
-        except Exception:
+        except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError, TimeoutError, KeyError) as e:
+            logger.debug("detect_lm_studio: check failed on port %s: %s", port, e)
             continue
     return None
 
@@ -186,8 +191,8 @@ def get_lm_studio_preset_info(model_id: str, base_url: str = "http://127.0.0.1:1
                     preset_info = model.get("preset_info") or model.get("config", {})
                     if preset_info:
                         return preset_info
-    except Exception:
-        pass
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError, TimeoutError, KeyError) as e:
+        logger.debug("get_lm_studio_preset_info: model list fetch failed: %s", e)
 
     # Fallback: try common preset endpoints
     # LM Studio v0.2+ uses /api/presets endpoint
@@ -213,7 +218,8 @@ def get_lm_studio_preset_info(model_id: str, base_url: str = "http://127.0.0.1:1
                     for key, value in presets_data.items():
                         if isinstance(value, dict) and value.get("modelId") == model_id:
                             return value
-        except Exception:
+        except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError, TimeoutError, KeyError) as e:
+            logger.debug("get_lm_studio_preset_info: preset endpoint %s failed: %s", endpoint, e)
             continue
 
     return None

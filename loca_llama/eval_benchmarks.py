@@ -10,7 +10,7 @@ All scoring is fully automated — no LLM judge required.
 from __future__ import annotations
 
 import json
-import os
+import logging
 import re
 import subprocess
 import sys
@@ -21,6 +21,8 @@ from pathlib import Path
 from typing import Any
 
 from .quality_bench import call_openai_api
+
+logger = logging.getLogger(__name__)
 
 
 # --- Data Cache ---
@@ -75,6 +77,7 @@ def _download_hf_rows(
             ),
         ]
         fetched = False
+        exhausted = False
         for url in api_urls:
             try:
                 req = urllib.request.Request(url, headers={"User-Agent": "loca-llama/0.1"})
@@ -82,20 +85,27 @@ def _download_hf_rows(
                     data = json.loads(resp.read().decode())
                     batch_rows = [r["row"] for r in data.get("rows", [])]
                     if not batch_rows:
+                        exhausted = True
                         break
                     rows.extend(batch_rows)
                     offset += len(batch_rows)
                     fetched = True
                     break
-            except Exception:
+            except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError, TimeoutError) as e:
+                logger.warning("Failed to fetch %s (offset %d): %s", url, offset, e)
                 continue
+        if exhausted:
+            break
         if not fetched:
             print(f"  Warning: download failed at offset {offset} (tried {len(api_urls)} APIs)")
             break
 
     if rows:
-        cache_file.write_text(json.dumps(rows[:max_rows], ensure_ascii=False))
-        print(f"  Cached {len(rows[:max_rows])} rows to {cache_file.name}")
+        try:
+            cache_file.write_text(json.dumps(rows[:max_rows], ensure_ascii=False))
+            print(f"  Cached {len(rows[:max_rows])} rows to {cache_file.name}")
+        except OSError as e:
+            logger.warning("Failed to write cache file %s: %s", cache_file, e)
 
     return rows[:max_rows]
 
@@ -159,6 +169,7 @@ def run_gsm8k(
 
     correct = 0
     total = 0
+    errors = 0
     sample_timings: list[float] = []
     confidence_scores: list[float] = []
 
@@ -195,7 +206,7 @@ def run_gsm8k(
                 print(f"    GSM8K: {i+1}/{len(data)} ({correct}/{total} correct)", flush=True)
 
         except Exception as e:
-            total += 1
+            errors += 1
             if (i + 1) % 50 == 0:
                 print(f"    GSM8K: {i+1}/{len(data)} (error: {e})", flush=True)
 
@@ -205,6 +216,7 @@ def run_gsm8k(
     print(f"  GSM8K: {correct}/{total} = {score:.1%}")
     return {
         "score": score, "correct": correct, "total": total,
+        "errors": errors, "error_rate": errors / (total + errors) if (total + errors) > 0 else 0,
         "avg_sample_time_ms": avg_time,
         "avg_confidence": avg_confidence,
     }
@@ -237,6 +249,7 @@ def run_arc_challenge(
 
     correct = 0
     total = 0
+    errors = 0
 
     for i, row in enumerate(data):
         question = row.get("question", "")
@@ -270,11 +283,14 @@ def run_arc_challenge(
                 print(f"    ARC: {i+1}/{len(data)} ({correct}/{total} correct)", flush=True)
 
         except Exception:
-            total += 1
+            errors += 1
 
     score = correct / total if total > 0 else 0
     print(f"  ARC-Challenge: {correct}/{total} = {score:.1%}")
-    return {"score": score, "correct": correct, "total": total}
+    return {
+        "score": score, "correct": correct, "total": total,
+        "errors": errors, "error_rate": errors / (total + errors) if (total + errors) > 0 else 0,
+    }
 
 
 def _extract_mc_answer(response: str, valid_labels: list[str]) -> str | None:
@@ -348,6 +364,7 @@ def run_hellaswag(
 
     correct = 0
     total = 0
+    errors = 0
 
     for i, row in enumerate(data):
         ctx = row.get("ctx", "")
@@ -387,20 +404,19 @@ def run_hellaswag(
                 print(f"    HellaSwag: {i+1}/{len(data)} ({correct}/{total} correct)", flush=True)
 
         except Exception:
-            total += 1
+            errors += 1
 
     score = correct / total if total > 0 else 0
     print(f"  HellaSwag: {correct}/{total} = {score:.1%}")
-    return {"score": score, "correct": correct, "total": total}
+    return {
+        "score": score, "correct": correct, "total": total,
+        "errors": errors, "error_rate": errors / (total + errors) if (total + errors) > 0 else 0,
+    }
 
 
 # =============================================================================
 # IFEval — Instruction Following Evaluation
 # =============================================================================
-
-# Rule-based verifiers for IFEval instruction types
-_IFEVAL_VERIFIERS: dict[str, Any] = {}
-
 
 def _verify_word_count(response: str, kwargs: dict) -> bool:
     """Verify response has specific word count constraints."""
@@ -598,6 +614,7 @@ def run_ifeval(
 
     correct = 0
     total = 0
+    errors = 0
 
     for i, row in enumerate(data):
         prompt_text = row.get("prompt", "")
@@ -633,11 +650,14 @@ def run_ifeval(
                 print(f"    IFEval: {i+1}/{len(data)} ({correct}/{total} correct)", flush=True)
 
         except Exception:
-            total += 1
+            errors += 1
 
     score = correct / total if total > 0 else 0
     print(f"  IFEval: {correct}/{total} = {score:.1%}")
-    return {"score": score, "correct": correct, "total": total}
+    return {
+        "score": score, "correct": correct, "total": total,
+        "errors": errors, "error_rate": errors / (total + errors) if (total + errors) > 0 else 0,
+    }
 
 
 # =============================================================================
@@ -652,7 +672,7 @@ def run_humaneval(
 ) -> dict[str, Any]:
     """Run HumanEval code generation benchmark."""
     samples = max_samples or 164
-    data = _download_hf_rows("openai/openai_humaneval", "default", "test", samples,
+    data = _download_hf_rows("openai/openai_humaneval", "openai_humaneval", "test", samples,
                              cache_name="humaneval")
 
     if not data:
@@ -660,6 +680,7 @@ def run_humaneval(
 
     correct = 0
     total = 0
+    errors = 0
 
     for i, row in enumerate(data):
         prompt_code = row.get("prompt", "")
@@ -696,11 +717,14 @@ def run_humaneval(
                 print(f"    HumanEval: {i+1}/{len(data)} ({correct}/{total} correct)", flush=True)
 
         except Exception:
-            total += 1
+            errors += 1
 
     score = correct / total if total > 0 else 0
     print(f"  HumanEval: {correct}/{total} = {score:.1%}")
-    return {"score": score, "correct": correct, "total": total}
+    return {
+        "score": score, "correct": correct, "total": total,
+        "errors": errors, "error_rate": errors / (total + errors) if (total + errors) > 0 else 0,
+    }
 
 
 def _extract_code(response: str, original_prompt: str) -> str:

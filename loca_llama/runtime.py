@@ -1,14 +1,18 @@
 """Runtime connector: manage models on LM Studio and llama.cpp servers."""
 
 import json
+import logging
 import os
 import subprocess
 import shutil
 import time
+import urllib.error
 import urllib.request
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -35,7 +39,8 @@ class LMStudioConnector:
         try:
             with urllib.request.urlopen(f"{self.base_url}/v1/models", timeout=3):
                 return True
-        except Exception:
+        except (urllib.error.URLError, json.JSONDecodeError, OSError, TimeoutError) as e:
+            logger.debug("LMStudioConnector.is_running: %s", e)
             return False
 
     def list_models(self) -> list[str]:
@@ -44,7 +49,8 @@ class LMStudioConnector:
             with urllib.request.urlopen(f"{self.base_url}/v1/models", timeout=5) as resp:
                 data = json.loads(resp.read().decode())
                 return [m["id"] for m in data.get("data", [])]
-        except Exception:
+        except (urllib.error.URLError, json.JSONDecodeError, OSError, TimeoutError) as e:
+            logger.debug("LMStudioConnector.list_models: %s", e)
             return []
 
     def get_model_info(self, model_id: str) -> dict | None:
@@ -52,7 +58,8 @@ class LMStudioConnector:
         try:
             with urllib.request.urlopen(f"{self.base_url}/v1/models/{urllib.parse.quote(model_id, safe='')}", timeout=5) as resp:
                 return json.loads(resp.read().decode())
-        except Exception:
+        except (urllib.error.URLError, json.JSONDecodeError, OSError, TimeoutError) as e:
+            logger.debug("LMStudioConnector.get_model_info(%s): %s", model_id, e)
             return None
 
     def chat(
@@ -121,7 +128,8 @@ class LlamaCppConnector:
             with urllib.request.urlopen(f"{self.base_url}/health", timeout=3) as resp:
                 data = json.loads(resp.read().decode())
                 return data.get("status") == "ok"
-        except Exception:
+        except (urllib.error.URLError, json.JSONDecodeError, OSError, TimeoutError) as e:
+            logger.debug("LlamaCppConnector.is_running: %s", e)
             return False
 
     def health(self) -> dict:
@@ -129,7 +137,8 @@ class LlamaCppConnector:
         try:
             with urllib.request.urlopen(f"{self.base_url}/health", timeout=5) as resp:
                 return json.loads(resp.read().decode())
-        except Exception:
+        except (urllib.error.URLError, json.JSONDecodeError, OSError, TimeoutError) as e:
+            logger.debug("LlamaCppConnector.health: %s", e)
             return {"status": "error"}
 
     def list_models(self) -> list[str]:
@@ -137,7 +146,8 @@ class LlamaCppConnector:
             with urllib.request.urlopen(f"{self.base_url}/v1/models", timeout=5) as resp:
                 data = json.loads(resp.read().decode())
                 return [m["id"] for m in data.get("data", [])]
-        except Exception:
+        except (urllib.error.URLError, json.JSONDecodeError, OSError, TimeoutError) as e:
+            logger.debug("LlamaCppConnector.list_models: %s", e)
             return []
 
     def get_props(self) -> dict:
@@ -145,7 +155,8 @@ class LlamaCppConnector:
         try:
             with urllib.request.urlopen(f"{self.base_url}/props", timeout=5) as resp:
                 return json.loads(resp.read().decode())
-        except Exception:
+        except (urllib.error.URLError, json.JSONDecodeError, OSError, TimeoutError) as e:
+            logger.debug("LlamaCppConnector.get_props: %s", e)
             return {}
 
     def get_slots(self) -> list[dict]:

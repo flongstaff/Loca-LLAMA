@@ -870,7 +870,7 @@ async def start_sql_benchmark(
         try:
             from loca_llama.sql_bench import run_sql_benchmark
 
-            runtimes = detect_all_runtimes()
+            runtimes = await asyncio.to_thread(detect_all_runtimes)
             rt = next((r for r in runtimes if r.name == req.runtime_name), None)
             if not rt:
                 job.status = "error"
@@ -1003,27 +1003,31 @@ async def get_sql_benchmark_report(
     if job.status != "complete":
         raise HTTPException(400, "Benchmark not yet complete")
 
-    from loca_llama.sql_bench import SQLTaskResult
-    from loca_llama.sql_bench_report import generate_sql_report
+    try:
+        from loca_llama.sql_bench import SQLTaskResult
+        from loca_llama.sql_bench_report import generate_sql_report
 
-    results = [
-        SQLTaskResult(
-            question_id=r["question_id"],
-            question=r["question"],
-            difficulty=r["difficulty"],
-            model=r["model"],
-            status=r["status"],
-            generated_sql=r.get("generated_sql", ""),
-            error_message=r.get("error_message", ""),
-            speed_tps=r.get("speed_tps", 0),
-            ttft_ms=r.get("ttft_ms", 0),
-            total_ms=r.get("total_ms", 0),
-            retries=r.get("retries", 0),
-        )
-        for r in job.results
-    ]
+        results = [
+            SQLTaskResult(
+                question_id=r["question_id"],
+                question=r["question"],
+                difficulty=r["difficulty"],
+                model=r["model"],
+                status=r["status"],
+                generated_sql=r.get("generated_sql", ""),
+                error_message=r.get("error_message", ""),
+                speed_tps=r.get("speed_tps", 0),
+                ttft_ms=r.get("ttft_ms", 0),
+                total_ms=r.get("total_ms", 0),
+                retries=r.get("retries", 0),
+            )
+            for r in job.results
+        ]
 
-    report_html = generate_sql_report(results, metadata={
-        "runtime": job.runtime_name,
-    })
-    return HTMLResponse(content=report_html)
+        report_html = generate_sql_report(results, metadata={
+            "runtime": job.runtime_name,
+        })
+        return HTMLResponse(content=report_html)
+    except Exception:
+        logger.exception("SQL benchmark report generation failed")
+        raise HTTPException(status_code=500, detail="Report generation failed")
