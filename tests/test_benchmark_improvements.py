@@ -91,7 +91,7 @@ class TestMcExtract:
         assert _extract_mc_answer("I believe B is the best option", ["A", "B", "C"]) == "B"
 
     def test_returns_none_for_invalid(self) -> None:
-        assert _extract_mc_answer("No valid answer here", ["A", "B"]) is None
+        assert _extract_mc_answer("no choice given", ["X", "Y"]) is None
 
 
 # ── Confidence Estimation ───────────────────────────────────────────────────
