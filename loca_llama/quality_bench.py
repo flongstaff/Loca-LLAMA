@@ -279,6 +279,8 @@ def extract_python_code(text: str) -> str:
 
 def score_task(task: dict[str, Any], response: str) -> tuple[float, float, str]:
     """Score response. Returns (contains_score, runnable_score, error)."""
+    # Strip thinking tags before scoring (Qwen3.5 thinking mode)
+    response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL).strip()
     validation = task["validation"]
 
     must_contain = validation.get("must_contain", [])
@@ -315,19 +317,15 @@ def score_task(task: dict[str, Any], response: str) -> tuple[float, float, str]:
 
     full_code = f"from dataclasses import dataclass\nfrom typing import Any\n\n{code}\n\n{test_code}"
 
+    from .code_sandbox import run_code_safe_with_output, UnsafeCodeError
     try:
-        result = subprocess.run(
-            [sys.executable, "-c", full_code],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode == 0 and "PASS" in result.stdout:
+        success, stdout, stderr = run_code_safe_with_output(full_code, timeout=10)
+        if success and "PASS" in stdout:
             return contains_score, 1.0, ""
-        err = result.stderr.strip().split("\n")[-1] if result.stderr else result.stdout.strip()
+        err = stderr.strip().split("\n")[-1] if stderr else stdout.strip()
         return contains_score, 0.0, err[:200]
-    except subprocess.TimeoutExpired:
-        return contains_score, 0.0, "Timeout (10s)"
-    except Exception as e:
-        return contains_score, 0.0, str(e)[:200]
+    except UnsafeCodeError as e:
+        return contains_score, 0.0, f"Unsafe code: {e}"
 
 
 # --- Model Discovery ---

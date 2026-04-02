@@ -217,6 +217,7 @@ class MemoryMonitor:
     def __init__(self, interval: float = 0.5):
         self.interval = interval
         self._samples: list[MemorySample] = []
+        self._lock = threading.Lock()
         self._running = False
         self._thread: threading.Thread | None = None
         self._start_time: float = 0.0
@@ -224,13 +225,15 @@ class MemoryMonitor:
 
     def start(self) -> None:
         """Start monitoring in background thread."""
-        self._samples = []
+        with self._lock:
+            self._samples = []
         self._running = True
         self._start_time = time.monotonic()
 
         # Take baseline sample
         baseline = get_memory_sample(self._start_time)
-        self._samples.append(baseline)
+        with self._lock:
+            self._samples.append(baseline)
 
         self._thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self._thread.start()
@@ -244,19 +247,22 @@ class MemoryMonitor:
 
         # Take final sample
         final = get_memory_sample(self._start_time)
-        self._samples.append(final)
+        with self._lock:
+            self._samples.append(final)
 
         return self._build_report()
 
     def get_current(self) -> MemorySample | None:
-        """Get the most recent sample (thread-safe read)."""
-        if self._samples:
-            return self._samples[-1]
-        return None
+        """Get the most recent sample."""
+        with self._lock:
+            if self._samples:
+                return self._samples[-1]
+            return None
 
     def get_history(self, limit: int = 60) -> list[MemorySample]:
-        """Return recent samples as a thread-safe snapshot."""
-        return list(self._samples[-limit:])
+        """Return recent samples as a snapshot."""
+        with self._lock:
+            return list(self._samples[-limit:])
 
     def get_report(self) -> MemoryReport:
         """Return aggregate memory report since monitor start."""
@@ -273,18 +279,22 @@ class MemoryMonitor:
             if not self._running:
                 break
             sample = get_memory_sample(self._start_time)
-            self._samples.append(sample)
+            with self._lock:
+                self._samples.append(sample)
 
     def _build_report(self) -> MemoryReport:
-        if not self._samples:
+        with self._lock:
+            samples = list(self._samples)
+
+        if not samples:
             return MemoryReport(total_gb=self._total_gb)
 
-        baseline = self._samples[0].used_gb
-        peak = max(s.used_gb for s in self._samples)
-        duration = self._samples[-1].timestamp - self._samples[0].timestamp
+        baseline = samples[0].used_gb
+        peak = max(s.used_gb for s in samples)
+        duration = samples[-1].timestamp - samples[0].timestamp
 
         return MemoryReport(
-            samples=list(self._samples),
+            samples=samples,
             peak_used_gb=peak,
             baseline_used_gb=baseline,
             total_gb=self._total_gb,

@@ -1,9 +1,13 @@
 """Search and browse models from HuggingFace and MLX Community."""
 
 import json
+import logging
+import urllib.error
 import urllib.request
 import urllib.parse
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -59,8 +63,11 @@ def search_huggingface(
         req = urllib.request.Request(url, headers={"User-Agent": "loca-llama/0.1"})
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode())
-    except Exception as e:
-        print(f"Error fetching from HuggingFace: {e}")
+    except urllib.error.URLError as e:
+        logger.warning("HuggingFace search network error: %s", e)
+        return []
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.warning("HuggingFace search data error: %s", e)
         return []
 
     models = []
@@ -105,7 +112,11 @@ def get_model_files(repo_id: str) -> list[dict]:
         req = urllib.request.Request(url, headers={"User-Agent": "loca-llama/0.1"})
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode())
-    except Exception:
+    except urllib.error.URLError as e:
+        logger.warning("HuggingFace files network error for %s: %s", repo_id, e)
+        return []
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.warning("HuggingFace files data error for %s: %s", repo_id, e)
         return []
 
     siblings = data.get("siblings", [])

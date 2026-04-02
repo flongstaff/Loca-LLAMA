@@ -136,8 +136,8 @@ def calculate_optimal_batch_size_v2(
     quant: QuantFormat,
     target_throughput: float | None = None,
     max_context: int = 8192,
-    preferred_batch_sizes: list[int] = None,
-) -> BatchOptimizationResult:
+    preferred_batch_sizes: list[int] | None = None,
+) -> BatchOptimizationResult | None:
     """Calculate optimal batch size with throughput estimation.
 
     Args:
@@ -225,7 +225,7 @@ def compare_batch_sizes(
     model: LLMModel,
     quant: QuantFormat,
     context_length: int = 4096,
-    batch_sizes: list[int] = None,
+    batch_sizes: list[int] | None = None,
 ) -> list[BatchOptimizationResult]:
     """Compare multiple batch sizes for a given model and context.
 
@@ -255,7 +255,7 @@ def optimize_for_batch_preference(
     quant: QuantFormat,
     batch_preference: str = "high",  # "high", "balanced", "low"
     context_length: int = 4096,
-) -> BatchOptimizationResult:
+) -> BatchOptimizationResult | None:
     """Optimize batch size based on user preference.
 
     Args:

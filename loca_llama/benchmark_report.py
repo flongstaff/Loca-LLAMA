@@ -77,7 +77,10 @@ def generate_html_report(
             chart_labels.append(f"Run {r.get('run_number', '')}")
             chart_values.append(r.get("tokens_per_second", 0))
 
-    chart_data_json = json.dumps({"labels": chart_labels, "values": chart_values})
+    # Escape </script> sequences to prevent script injection in embedded JSON
+    chart_data_json = json.dumps(
+        {"labels": chart_labels, "values": chart_values}
+    ).replace("</", r"<\/")
 
     return f"""<!DOCTYPE html>
 <html lang="en">

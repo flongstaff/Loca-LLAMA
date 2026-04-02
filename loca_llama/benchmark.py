@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import re
 import shutil
 import socket
@@ -107,8 +108,8 @@ def detect_litellm() -> RuntimeInfo | None:
 
 def detect_omlx() -> RuntimeInfo | None:
     """Check if oMLX server is running."""
-    url = "http://127.0.0.1:8000"
-    api_key = "9514"
+    url = os.environ.get("OMLX_URL", "http://127.0.0.1:8000")
+    api_key = os.environ.get("OMLX_API_KEY", "9514")
     try:
         with urllib.request.urlopen(f"{url}/health", timeout=2) as resp:
             data = json.loads(resp.read().decode())

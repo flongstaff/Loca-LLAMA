@@ -1,6 +1,7 @@
 """Runtime connector: manage models on LM Studio and llama.cpp servers."""
 
 import json
+import os
 import subprocess
 import shutil
 import time
@@ -278,7 +279,10 @@ class LiteLLMConnector:
         req = urllib.request.Request(
             f"{self.base_url}/v1/chat/completions",
             data=payload,
-            headers={"Content-Type": "application/json", "Authorization": "Bearer sk-local"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {os.environ.get('LITELLM_API_KEY', 'sk-local')}",
+            },
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=120) as resp:

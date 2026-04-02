@@ -15,12 +15,16 @@ Provides comprehensive benchmarking for:
 from __future__ import annotations
 
 import json
+import logging
+import socket
 import subprocess
 import time
 import urllib.request
 import urllib.error
 from dataclasses import dataclass, field
 from collections.abc import Generator
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -117,8 +121,14 @@ def run_server(config: BenchmarkConfig) -> subprocess.Popen | None:
 
     exe = shutil.which("llama-server") or shutil.which("server")
     if not exe:
-        print("Error: llama-server not found in PATH")
+        logger.error("llama-server not found in PATH")
         return None
+
+    # Check port availability before starting
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        if s.connect_ex(("127.0.0.1", config.port)) == 0:
+            logger.error("Port %d already in use", config.port)
+            return None
 
     cmd = [
         exe,
@@ -153,10 +163,12 @@ def run_server(config: BenchmarkConfig) -> subprocess.Popen | None:
                 data = json.loads(resp.read().decode())
                 if data.get("status") == "ok":
                     return proc
-        except Exception:
+        except (urllib.error.URLError, OSError, json.JSONDecodeError):
             if proc.poll() is not None:
+                logger.warning("Server process exited during startup")
                 return None
 
+    logger.warning("Server did not become ready within 60s")
     return None
 
 
@@ -193,8 +205,10 @@ def send_completion_request(
             success = True
             return response, ttft_ms, success
     except urllib.error.HTTPError as e:
+        logger.debug("Completion HTTP error: %s", e.code)
         return {}, ttft_ms, False
-    except Exception as e:
+    except (urllib.error.URLError, OSError) as e:
+        logger.debug("Completion network error: %s", e)
         return {}, ttft_ms, False
 
 

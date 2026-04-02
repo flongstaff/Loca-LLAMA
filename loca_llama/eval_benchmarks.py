@@ -28,6 +28,7 @@ from .quality_bench import call_openai_api
 EVAL_DATA_DIR = Path.home() / ".loca-llama" / "eval_data"
 
 HF_DATASETS_API = "https://datasets-server.huggingface.co/rows?dataset={dataset}&config={config}&split={split}&offset={offset}&length={length}"
+HF_DATASETS_API_V2 = "https://huggingface.co/api/datasets/{dataset}/rows?config={config}&split={split}&offset={offset}&length={length}"
 
 
 def _ensure_data_dir() -> Path:
@@ -61,24 +62,35 @@ def _download_hf_rows(
     offset = 0
 
     while len(rows) < max_rows:
-        url = HF_DATASETS_API.format(
-            dataset=urllib.request.quote(dataset, safe=""),
-            config=urllib.request.quote(config, safe=""),
-            split=split,
-            offset=offset,
-            length=batch_size,
-        )
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "loca-llama/0.1"})
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read().decode())
-                batch_rows = [r["row"] for r in data.get("rows", [])]
-                if not batch_rows:
+        api_urls = [
+            HF_DATASETS_API.format(
+                dataset=urllib.request.quote(dataset, safe=""),
+                config=urllib.request.quote(config, safe=""),
+                split=split, offset=offset, length=batch_size,
+            ),
+            HF_DATASETS_API_V2.format(
+                dataset=urllib.request.quote(dataset, safe="/"),
+                config=urllib.request.quote(config, safe=""),
+                split=split, offset=offset, length=batch_size,
+            ),
+        ]
+        fetched = False
+        for url in api_urls:
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "loca-llama/0.1"})
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    data = json.loads(resp.read().decode())
+                    batch_rows = [r["row"] for r in data.get("rows", [])]
+                    if not batch_rows:
+                        break
+                    rows.extend(batch_rows)
+                    offset += len(batch_rows)
+                    fetched = True
                     break
-                rows.extend(batch_rows)
-                offset += len(batch_rows)
-        except Exception as e:
-            print(f"  Warning: download error at offset {offset}: {e}")
+            except Exception:
+                continue
+        if not fetched:
+            print(f"  Warning: download failed at offset {offset} (tried {len(api_urls)} APIs)")
             break
 
     if rows:
@@ -98,6 +110,9 @@ def _gsm8k_extract_answer(text: str) -> str | None:
     GSM8K gold answers use #### followed by the number.
     Models may use similar patterns or just output numbers.
     """
+    # Strip thinking tags first (Qwen3.5 thinking mode contains misleading numbers)
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
     # Look for #### pattern first (gold format)
     m = re.search(r"####\s*([\d,.-]+)", text)
     if m:
@@ -662,14 +677,11 @@ def _extract_code(response: str, original_prompt: str) -> str:
 
 
 def _run_code_safe(code: str, timeout: int = 10) -> bool:
-    """Execute Python code in a subprocess sandbox."""
+    """Validate and execute Python code in a subprocess sandbox."""
+    from .code_sandbox import run_code_safe, UnsafeCodeError
     try:
-        result = subprocess.run(
-            [sys.executable, "-c", code],
-            capture_output=True, text=True, timeout=timeout,
-        )
-        return result.returncode == 0
-    except (subprocess.TimeoutExpired, Exception):
+        return run_code_safe(code, timeout=timeout)
+    except UnsafeCodeError:
         return False
 
 
